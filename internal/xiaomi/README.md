@@ -60,5 +60,42 @@ You can use a second channel for dual cameras: `channel=2`.
 
 ```yaml
 streams:
-  xiaomi1: xiaomi://***&channel=2
+xiaomi1: xiaomi://***&channel=2
 ```
+
+## Stable recording timestamps
+
+Some Xiaomi cameras emit irregular source timestamps that cause fragmented or
+stalled recordings after RTSP restreaming. This distribution can normalize
+video timestamps to a configured frame rate:
+
+```yaml
+streams:
+  xiaomi1: xiaomi://***&subtype=2&fps=20
+```
+
+The `fps` value must match the camera stream and may be between 1 and 120. If it
+is omitted, the original camera timestamp conversion is retained.
+
+## PTZ API in this distribution
+
+The active Xiaomi `miss` connection exposes a local control API:
+
+```text
+POST /api/xiaomi/ptz?src=xiaomi1&direction=left&duration=300
+```
+
+Supported directions are `left`, `right`, `up`, `down` and `stop`. Movement
+duration is expressed in milliseconds and is limited to two seconds per
+request. The endpoint reuses an active stream variant for the same camera and
+always sends a stop command after a timed movement.
+
+Saved Xiaomi Home positions are available through:
+
+```text
+GET  /api/xiaomi/presets?src=xiaomi1
+POST /api/xiaomi/presets?src=xiaomi1&token=1
+```
+
+These APIs are consumed by the bundled `xiaomi-onvif` bridge. Keep the go2rtc
+API on a trusted local or container network.

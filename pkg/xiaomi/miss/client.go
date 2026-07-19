@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/AlexxIT/go2rtc/pkg/tutk"
@@ -79,8 +80,9 @@ func NewClient(rawURL string) (*Client, error) {
 
 type Client struct {
 	Conn
-	key   []byte
-	model string
+	key       []byte
+	model     string
+	commandMu sync.Mutex
 }
 
 // startCommandLoop drains the command channel (channel 0) in the background.
@@ -143,11 +145,33 @@ func (c *Client) Version() string {
 }
 
 func (c *Client) WriteCommand(data []byte) error {
+	c.commandMu.Lock()
+	defer c.commandMu.Unlock()
+
 	data, err := crypto.Encode(data, c.key)
 	if err != nil {
 		return err
 	}
 	return c.Conn.WriteCommand(cmdEncoded, data)
+}
+
+func motorCommand(operation int) ([]byte, error) {
+	if operation < 0 || operation > 4 {
+		return nil, fmt.Errorf("miss: invalid motor operation %d", operation)
+	}
+
+	data := binary.BigEndian.AppendUint32(nil, cmdMotorReq)
+	return fmt.Appendf(data, `{"operation":%d}`, operation), nil
+}
+
+// SetDirection controls a modern MISS camera motor. Operations are defined by
+// the Xiaomi Home app: 0 stop, 1 left, 2 right, 3 up, 4 down.
+func (c *Client) SetDirection(operation int) error {
+	data, err := motorCommand(operation)
+	if err != nil {
+		return err
+	}
+	return c.WriteCommand(data)
 }
 
 const (

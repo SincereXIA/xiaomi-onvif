@@ -55,6 +55,22 @@ func (s *Stream) Sources() []string {
 	return sources
 }
 
+// GetConnections returns a snapshot of currently connected producers.
+func (s *Stream) GetConnections() []core.Producer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	connections := make([]core.Producer, 0, len(s.producers))
+	for _, producer := range s.producers {
+		producer.mu.Lock()
+		if producer.conn != nil {
+			connections = append(connections, producer.conn)
+		}
+		producer.mu.Unlock()
+	}
+	return connections
+}
+
 func (s *Stream) SetSource(source string) {
 	for _, prod := range s.producers {
 		prod.SetSource(source)

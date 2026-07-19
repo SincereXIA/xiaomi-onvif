@@ -48,6 +48,8 @@ func Init() {
 	})
 
 	api.HandleFunc("api/xiaomi", apiXiaomi)
+	api.HandleFunc("api/xiaomi/ptz", apiPTZ)
+	api.HandleFunc("api/xiaomi/presets", apiPresets)
 }
 
 var log zerolog.Logger
