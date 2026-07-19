@@ -1,0 +1,33 @@
+# Merge this example into an existing Frigate configuration. Frigate must be
+# able to resolve the go2rtc and onvif service names, or replace them with local
+# network addresses.
+
+cameras:
+  living:
+    ffmpeg:
+      inputs:
+        - path: rtsp://go2rtc:8554/living_4k
+          roles: [record, detect]
+    detect:
+      enabled: true
+      width: 1920
+      height: 1080
+      fps: 5
+    objects:
+      track: [person, cat, dog]
+    zones:
+      full:
+        coordinates: 0,0,1,0,1,1,0,1
+    onvif:
+      host: onvif
+      port: 8891
+      user: ""
+      password: ""
+      autotracking:
+        enabled: true
+        calibrate_on_startup: true
+        zooming: disabled
+        track: [person, cat, dog]
+        required_zones: [full]
+        return_preset: default
+        timeout: 10

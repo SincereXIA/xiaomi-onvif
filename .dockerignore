@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+.tmp
+.DS_Store
+go2rtc
+go2rtc.exe
+go2rtc_*
+xiaomi-onvif
+xiaomi-onvif_*
+node_modules
+website/.vitepress/cache
+website/.vitepress/dist
+examples/xiaomi-onvif/*.local.yaml

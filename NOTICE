@@ -1,0 +1,11 @@
+xiaomi-onvif
+
+This distribution includes and modifies go2rtc, originally developed by
+Alexey Khit and contributors and licensed under the MIT License.
+
+Original project: https://github.com/AlexxIT/go2rtc
+Upstream base for this distribution is recorded in UPSTREAM.md.
+
+Xiaomi, Mi Home, TP-Link, Frigate and go2rtc are trademarks or project names of
+their respective owners. This project is independent and is not endorsed by or
+affiliated with those owners.

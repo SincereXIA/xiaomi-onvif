@@ -1,0 +1,22 @@
+name: Feature request
+description: Propose a focused improvement or new camera capability
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    attributes:
+      label: Use case
+      description: Explain the user problem rather than only the implementation.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Camera model and firmware
+      description: Required for camera-specific behavior; write not applicable otherwise.
+    validations:
+      required: true

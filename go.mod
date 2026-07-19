@@ -2,6 +2,8 @@ module github.com/AlexxIT/go2rtc
 
 go 1.24.0
 
+toolchain go1.26.5
+
 require (
 	github.com/asticode/go-astits v1.14.0
 	github.com/eclipse/paho.mqtt.golang v1.5.1

@@ -1,0 +1,14 @@
+api:
+  listen: ":1984"
+
+rtsp:
+  listen: ":8554"
+
+# Obtain this account entry through the go2rtc Xiaomi login flow. Never commit
+# a real value to a public repository.
+xiaomi:
+  CHANGE_ME_ACCOUNT_ID: CHANGE_ME_ACCOUNT_TOKEN
+
+streams:
+  living_4k:
+    - xiaomi://CHANGE_ME_ACCOUNT_ID:CHANGE_ME_REGION@CHANGE_ME_CAMERA_IP?did=CHANGE_ME_DEVICE_ID&model=CHANGE_ME_MODEL&subtype=2&fps=20

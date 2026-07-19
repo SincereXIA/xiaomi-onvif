@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible defect without private camera data
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: checkboxes
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials, account IDs, device IDs, tokens, public addresses and private video.
+          required: true
+  - type: input
+    attributes:
+      label: xiaomi-onvif version
+      description: Output of `xiaomi-onvif -version` or the container tag.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Camera model and firmware
+      placeholder: model identifier; firmware version
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Environment
+      placeholder: OS, architecture, Docker version, Frigate version if relevant
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Reproduction
+      description: Minimal steps and sanitized configuration.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Sanitized logs
+      render: text

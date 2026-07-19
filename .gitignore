@@ -3,6 +3,7 @@
 
 go2rtc.yaml
 go2rtc.json
+!examples/xiaomi-onvif/go2rtc.yaml
 
 go2rtc_freebsd*
 go2rtc_linux*
@@ -11,6 +12,12 @@ go2rtc_win*
 
 /go2rtc
 /go2rtc.exe
+/xiaomi-onvif
+/xiaomi-onvif.exe
+/xiaomi-onvif_*
+
+.env
+*.local.yaml
 
 0_test.go
 

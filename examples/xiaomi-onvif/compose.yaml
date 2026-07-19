@@ -1,0 +1,44 @@
+name: xiaomi-onvif
+
+services:
+  go2rtc:
+    image: ${XIAOMI_ONVIF_IMAGE:-xiaomi-onvif:dev}
+    container_name: xiaomi-onvif-go2rtc
+    restart: unless-stopped
+    command: ["go2rtc", "-config", "/config/go2rtc.yaml"]
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+    ports:
+      - "1984:1984"
+      - "8554:8554"
+    networks: [camera]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:1984/api"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  onvif:
+    image: ${XIAOMI_ONVIF_IMAGE:-xiaomi-onvif:dev}
+    container_name: xiaomi-onvif-bridge
+    restart: unless-stopped
+    depends_on:
+      go2rtc:
+        condition: service_healthy
+    command:
+      - xiaomi-onvif
+      - -go2rtc=http://go2rtc:1984
+      - -rtsp=rtsp://go2rtc:8554
+      - -camera=living=:8891,living_4k
+    ports:
+      - "8891:8891"
+    networks: [camera]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8891/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+networks:
+  camera:
+    name: xiaomi-onvif-camera
