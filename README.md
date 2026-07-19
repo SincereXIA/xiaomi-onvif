@@ -55,21 +55,26 @@ Requirements:
 - local network access from go2rtc to the camera;
 - Internet access when go2rtc needs to refresh Xiaomi encryption keys.
 
-Build the integrated image:
-
-```shell
-docker build -f docker/Dockerfile -t xiaomi-onvif:dev .
-```
-
 Copy the example directory and replace every `CHANGE_ME` value:
 
 ```shell
 cp -R examples/xiaomi-onvif xiaomi-onvif-config
+docker compose -f xiaomi-onvif-config/compose.yaml pull
 docker compose -f xiaomi-onvif-config/compose.yaml up -d
 ```
 
-The example starts two services from the same image. `go2rtc` owns the camera
-connection; `xiaomi-onvif` exposes port `8891` for ONVIF clients.
+The example uses the published
+`ghcr.io/sincerexia/xiaomi-onvif:0.1.0-beta.2` multi-architecture image and
+starts two services from it. `go2rtc` owns the camera connection;
+`xiaomi-onvif` exposes port `8891` for ONVIF clients.
+
+To build and use the image locally instead:
+
+```shell
+docker build -f docker/Dockerfile -t xiaomi-onvif:dev .
+XIAOMI_ONVIF_IMAGE=xiaomi-onvif:dev \
+  docker compose -f xiaomi-onvif-config/compose.yaml up -d
+```
 
 See:
 

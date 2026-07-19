@@ -18,20 +18,24 @@ ONVIF 代理依赖新增的 `/api/xiaomi/ptz` 和
 
 ## 快速开始
 
-构建镜像：
-
-```shell
-docker build -f docker/Dockerfile -t xiaomi-onvif:dev .
-```
-
 复制示例并替换所有 `CHANGE_ME`：
 
 ```shell
 cp -R examples/xiaomi-onvif xiaomi-onvif-config
+docker compose -f xiaomi-onvif-config/compose.yaml pull
 docker compose -f xiaomi-onvif-config/compose.yaml up -d
 ```
 
-示例使用同一个镜像启动两个容器：go2rtc 维护摄像头连接，ONVIF 容器把视频地址、云台和预置点转换为 Frigate 可识别的接口。
+示例默认使用已发布的多架构镜像
+`ghcr.io/sincerexia/xiaomi-onvif:0.1.0-beta.2`，并用同一个镜像启动两个容器：go2rtc 维护摄像头连接，ONVIF 容器把视频地址、云台和预置点转换为 Frigate 可识别的接口。
+
+如需在本地构建并使用镜像：
+
+```shell
+docker build -f docker/Dockerfile -t xiaomi-onvif:dev .
+XIAOMI_ONVIF_IMAGE=xiaomi-onvif:dev \
+  docker compose -f xiaomi-onvif-config/compose.yaml up -d
+```
 
 ## 摄像头映射
 

@@ -2,7 +2,7 @@ name: xiaomi-onvif
 
 services:
   go2rtc:
-    image: ${XIAOMI_ONVIF_IMAGE:-xiaomi-onvif:dev}
+    image: ${XIAOMI_ONVIF_IMAGE:-ghcr.io/sincerexia/xiaomi-onvif:0.1.0-beta.2}
     container_name: xiaomi-onvif-go2rtc
     restart: unless-stopped
     command: ["go2rtc", "-config", "/config/go2rtc.yaml"]
@@ -19,7 +19,7 @@ services:
       retries: 5
 
   onvif:
-    image: ${XIAOMI_ONVIF_IMAGE:-xiaomi-onvif:dev}
+    image: ${XIAOMI_ONVIF_IMAGE:-ghcr.io/sincerexia/xiaomi-onvif:0.1.0-beta.2}
     container_name: xiaomi-onvif-bridge
     restart: unless-stopped
     depends_on:
