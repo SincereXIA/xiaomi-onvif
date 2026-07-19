@@ -3,6 +3,7 @@ package miss
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/AlexxIT/go2rtc/pkg/core"
@@ -15,15 +16,25 @@ import (
 type Producer struct {
 	core.Connection
 	client *Client
+	fps    uint32
 }
 
 func Dial(rawURL string) (core.Producer, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+
+	fps, err := parseFPS(u.Query().Get("fps"))
+	if err != nil {
+		return nil, err
+	}
+
 	client, err := NewClient(rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	u, _ := url.Parse(rawURL)
 	query := u.Query()
 
 	err = client.StartMedia(query.Get("channel"), query.Get("subtype"), query.Get("audio"))
@@ -49,7 +60,21 @@ func Dial(rawURL string) (core.Producer, error) {
 			Transport:  client,
 		},
 		client: client,
+		fps:    fps,
 	}, nil
+}
+
+func parseFPS(s string) (uint32, error) {
+	if s == "" {
+		return 0, nil
+	}
+
+	fps, err := strconv.ParseUint(s, 10, 32)
+	if err != nil || fps == 0 || fps > 120 {
+		return 0, fmt.Errorf("xiaomi: invalid fps %q", s)
+	}
+
+	return uint32(fps), nil
 }
 
 func probe(client *Client, audio bool) ([]*core.Media, error) {
@@ -125,10 +150,92 @@ func probe(client *Client, audio bool) ([]*core.Media, error) {
 	return medias, nil
 }
 
-const timestamp40ms = 48000 * 0.040
+const (
+	videoClockRate     = 90000
+	opusClockRate      = 48000
+	opusDefaultSamples = opusClockRate * 40 / 1000
+)
+
+type videoTimestampNormalizer struct {
+	fps       uint64
+	started   bool
+	source    uint64
+	timestamp uint32
+}
+
+func (n *videoTimestampNormalizer) normalize(source uint64) uint32 {
+	if n.fps == 0 {
+		return TimeToRTP(source, videoClockRate)
+	}
+
+	if !n.started {
+		n.started = true
+		n.source = source
+		n.timestamp = TimeToRTP(source, videoClockRate)
+		return n.timestamp
+	}
+
+	// A frame may be split into multiple NAL units. Keep all packets with the
+	// same camera timestamp in the same RTP access unit.
+	if source == n.source {
+		return n.timestamp
+	}
+
+	frames := uint64(1)
+	if source > n.source {
+		// Quantize camera millisecond jitter to the configured frame interval,
+		// while preserving real gaps when one or more frames were dropped.
+		frames = ((source-n.source)*n.fps + 500) / 1000
+		if frames == 0 {
+			frames = 1
+		}
+	}
+
+	n.source = source
+	n.timestamp += uint32(frames * videoClockRate / n.fps)
+	return n.timestamp
+}
+
+func opusPacketSamples(payload []byte) uint32 {
+	if len(payload) == 0 {
+		return opusDefaultSamples
+	}
+
+	config := payload[0] >> 3
+	var frameSamples uint32
+	switch {
+	case config < 12: // SILK: 10, 20, 40 or 60 ms
+		frameSamples = [...]uint32{480, 960, 1920, 2880}[config&3]
+	case config < 16: // Hybrid: 10 or 20 ms
+		frameSamples = [...]uint32{480, 960}[config&1]
+	default: // CELT: 2.5, 5, 10 or 20 ms
+		frameSamples = [...]uint32{120, 240, 480, 960}[config&3]
+	}
+
+	var frames uint32
+	switch payload[0] & 3 {
+	case 0:
+		frames = 1
+	case 1, 2:
+		frames = 2
+	case 3:
+		if len(payload) < 2 {
+			return opusDefaultSamples
+		}
+		frames = uint32(payload[1] & 0x3F)
+	}
+
+	samples := frameSamples * frames
+	if frames == 0 || samples > opusClockRate*120/1000 {
+		return opusDefaultSamples
+	}
+	return samples
+}
 
 func (p *Producer) Start() error {
+	var videoSeq, audioSeq uint16
 	var audioTS uint32
+	videoTS := videoTimestampNormalizer{fps: uint64(p.fps)}
 
 	for {
 		_ = p.client.SetDeadline(time.Now().Add(10 * time.Second))
@@ -147,11 +254,12 @@ func (p *Producer) Start() error {
 		case codecH264, codecH265:
 			pkt2 = &core.Packet{
 				Header: rtp.Header{
-					SequenceNumber: uint16(pkt.Sequence),
-					Timestamp:      TimeToRTP(pkt.Timestamp, 90000),
+					SequenceNumber: videoSeq,
+					Timestamp:      videoTS.normalize(pkt.Timestamp),
 				},
 				Payload: annexb.EncodeToAVCC(pkt.Payload),
 			}
+			videoSeq++
 			if pkt.CodecID == codecH264 {
 				name = core.CodecH264
 			} else {
@@ -163,11 +271,12 @@ func (p *Producer) Start() error {
 				Header: rtp.Header{
 					Version:        2,
 					Marker:         true,
-					SequenceNumber: uint16(pkt.Sequence),
+					SequenceNumber: audioSeq,
 					Timestamp:      audioTS,
 				},
 				Payload: pkt.Payload,
 			}
+			audioSeq++
 			audioTS += uint32(len(pkt.Payload))
 		case codecOPUS:
 			name = core.CodecOpus
@@ -175,13 +284,13 @@ func (p *Producer) Start() error {
 				Header: rtp.Header{
 					Version:        2,
 					Marker:         true,
-					SequenceNumber: uint16(pkt.Sequence),
+					SequenceNumber: audioSeq,
 					Timestamp:      audioTS,
 				},
 				Payload: pkt.Payload,
 			}
-			// known cameras sends packets with 40ms long
-			audioTS += timestamp40ms
+			audioSeq++
+			audioTS += opusPacketSamples(pkt.Payload)
 		}
 
 		for _, recv := range p.Receivers {
@@ -196,6 +305,10 @@ func (p *Producer) Start() error {
 func (p *Producer) Stop() error {
 	_ = p.client.StopMedia()
 	return p.Connection.Stop()
+}
+
+func (p *Producer) SetDirection(operation int) error {
+	return p.client.SetDirection(operation)
 }
 
 // TimeToRTP convert time in milliseconds to RTP time
