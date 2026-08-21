@@ -9,7 +9,7 @@ require (
 	github.com/expr-lang/expr v1.17.7
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/mattn/go-isatty v0.0.20
+	github.com/mattn/go-isatty v0.0.23
 	github.com/miekg/dns v1.1.70
 	github.com/pion/dtls/v3 v3.0.11
 	github.com/pion/ice/v4 v4.2.0
