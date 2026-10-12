@@ -130,7 +130,13 @@ func (c *Conn) worker() {
 		// 6  0000  seq
 		switch buf[1] {
 		case msgDrw:
+			if n < 8 {
+				continue
+			}
 			ch := buf[5]
+			if int(ch) >= len(c.channels) || c.channels[ch] == nil {
+				continue // channel not used by go2rtc
+			}
 			channel := c.channels[ch]
 
 			if c.isTCP {
@@ -265,7 +271,7 @@ func (c *Conn) WritePacket(hdr, payload []byte) error {
 	c.seqCh3++
 	binary.BigEndian.PutUint32(req[8:], n)
 	copy(req[offset:], hdr)
-	copy(req[offset+hdrSize:], hdr)
+	copy(req[offset+hdrSize:], payload)
 
 	_, err := c.Conn.Write(req)
 	return err
