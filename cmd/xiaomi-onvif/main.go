@@ -75,6 +75,7 @@ func (f *onvifCameraFlag) Set(value string) error {
 type proxy struct {
 	name         string
 	listen       string
+	video        videoProfile
 	go2rtcURL    string
 	rtspURL      string
 	httpClient   *http.Client
@@ -89,9 +90,11 @@ type proxy struct {
 
 func main() {
 	var cameras cameraFlag
+	var cameraProfiles cameraProfileFlag
 	var onvifCameras onvifCameraFlag
 	var showVersion bool
 	flag.Var(&cameras, "camera", "Xiaomi camera mapping NAME=LISTEN_ADDR[,STREAM]; may be repeated")
+	flag.Var(&cameraProfiles, "camera-profile", "per-camera ONVIF profile NAME=width=N,height=N,fps=N,codec=H264|H265; fields are optional and the flag may be repeated for different cameras")
 	flag.Var(&onvifCameras, "compat-camera", "upstream ONVIF compatibility mapping NAME=LISTEN_ADDR,DEVICE_URL,SERVICE_URL[,PAN_GAIN,TILT_GAIN]; may be repeated")
 	flag.Var(&onvifCameras, "onvif-camera", "deprecated alias for -compat-camera")
 	go2rtcURL := flag.String("go2rtc", "http://127.0.0.1:1984", "go2rtc HTTP base URL")
@@ -114,9 +117,9 @@ func main() {
 		fmt.Printf("xiaomi-onvif %s (commit=%s date=%s)\n", version, commit, date)
 		return
 	}
-	profileCodec = strings.ToUpper(strings.TrimSpace(profileCodec))
-	if profileWidth < 1 || profileHeight < 1 || profileFPS < 1 || profileFPS > 120 || (profileCodec != "H264" && profileCodec != "H265") {
-		log.Fatal("invalid ONVIF profile metadata: width and height must be positive, fps must be 1..120, codec must be H264 or H265")
+	profiles, err := resolveCameraProfiles(cameras, cameraProfiles, videoProfile{profileWidth, profileHeight, profileFPS, profileCodec})
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	if len(cameras) == 0 && len(onvifCameras) == 0 {
@@ -140,6 +143,7 @@ func main() {
 		p := &proxy{
 			name:         name,
 			listen:       listen,
+			video:        profiles[name],
 			go2rtcURL:    strings.TrimRight(*go2rtcURL, "/"),
 			rtspURL:      rtspURL,
 			httpClient:   &http.Client{Timeout: requestTimeout},
@@ -884,7 +888,7 @@ func (p *proxy) getProfile() string {
 
 func (p *proxy) profile(tag string) string {
 	name := xmlEscape(p.name)
-	return fmt.Sprintf(`<trt:%s token="%s" fixed="true"><tt:Name>%s</tt:Name><tt:VideoSourceConfiguration token="%s_source"><tt:Name>%s source</tt:Name><tt:UseCount>1</tt:UseCount><tt:SourceToken>%s_source</tt:SourceToken><tt:Bounds x="0" y="0" width="%d" height="%d"/></tt:VideoSourceConfiguration><tt:VideoEncoderConfiguration token="%s_encoder"><tt:Name>%s %s</tt:Name><tt:UseCount>1</tt:UseCount><tt:Encoding>%s</tt:Encoding><tt:Resolution><tt:Width>%d</tt:Width><tt:Height>%d</tt:Height></tt:Resolution><tt:Quality>5</tt:Quality><tt:RateControl><tt:FrameRateLimit>%d</tt:FrameRateLimit><tt:EncodingInterval>1</tt:EncodingInterval><tt:BitrateLimit>4096</tt:BitrateLimit></tt:RateControl><tt:SessionTimeout>PT60S</tt:SessionTimeout></tt:VideoEncoderConfiguration>%s</trt:%s>`, tag, name, name, name, name, name, profileWidth, profileHeight, name, name, profileCodec, profileCodec, profileWidth, profileHeight, profileFPS, p.ptzConfiguration("PTZConfiguration"), tag)
+	return fmt.Sprintf(`<trt:%s token="%s" fixed="true"><tt:Name>%s</tt:Name><tt:VideoSourceConfiguration token="%s_source"><tt:Name>%s source</tt:Name><tt:UseCount>1</tt:UseCount><tt:SourceToken>%s_source</tt:SourceToken><tt:Bounds x="0" y="0" width="%d" height="%d"/></tt:VideoSourceConfiguration><tt:VideoEncoderConfiguration token="%s_encoder"><tt:Name>%s %s</tt:Name><tt:UseCount>1</tt:UseCount><tt:Encoding>%s</tt:Encoding><tt:Resolution><tt:Width>%d</tt:Width><tt:Height>%d</tt:Height></tt:Resolution><tt:Quality>5</tt:Quality><tt:RateControl><tt:FrameRateLimit>%d</tt:FrameRateLimit><tt:EncodingInterval>1</tt:EncodingInterval><tt:BitrateLimit>4096</tt:BitrateLimit></tt:RateControl><tt:SessionTimeout>PT60S</tt:SessionTimeout></tt:VideoEncoderConfiguration>%s</trt:%s>`, tag, name, name, name, name, name, p.video.width, p.video.height, name, name, p.video.codec, p.video.codec, p.video.width, p.video.height, p.video.fps, p.ptzConfiguration("PTZConfiguration"), tag)
 }
 
 func (p *proxy) ptzConfiguration(tag string) string {
@@ -915,7 +919,7 @@ func (p *proxy) node(tag string) string {
 
 func (p *proxy) getVideoSources() string {
 	name := xmlEscape(p.name)
-	return fmt.Sprintf(`<trt:GetVideoSourcesResponse><trt:VideoSources token="%s_source"><tt:Framerate>%d</tt:Framerate><tt:Resolution><tt:Width>%d</tt:Width><tt:Height>%d</tt:Height></tt:Resolution></trt:VideoSources></trt:GetVideoSourcesResponse>`, name, profileFPS, profileWidth, profileHeight)
+	return fmt.Sprintf(`<trt:GetVideoSourcesResponse><trt:VideoSources token="%s_source"><tt:Framerate>%d</tt:Framerate><tt:Resolution><tt:Width>%d</tt:Width><tt:Height>%d</tt:Height></tt:Resolution></trt:VideoSources></trt:GetVideoSourcesResponse>`, name, p.video.fps, p.video.width, p.video.height)
 }
 
 func (p *proxy) getStatus() string {

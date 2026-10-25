@@ -25,6 +25,7 @@ DEFAULTS = {
     "profile_fps": 20,
     "profile_codec": "H264",
 }
+PROFILE_FIELDS = ("profile_width", "profile_height", "profile_fps", "profile_codec")
 
 
 class ConfigError(ValueError):
@@ -64,6 +65,23 @@ def stream_name(value):
     return value
 
 
+def validate_profile(values):
+    """Validate global defaults or a camera's resolved profile without coercion."""
+    for key, maximum in (
+        ("profile_width", 16384),
+        ("profile_height", 16384),
+        ("profile_fps", 120),
+    ):
+        require(
+            type(values[key]) is int and 1 <= values[key] <= maximum,
+            key + " is outside its supported range",
+        )
+    require(
+        values["profile_codec"] in ("H264", "H265"),
+        "profile_codec must be H264 or H265",
+    )
+
+
 def settings(options, config_root=Path("/config")):
     """Return validated options and argument arrays without invoking a shell."""
     require(
@@ -96,18 +114,7 @@ def settings(options, config_root=Path("/config")):
         isinstance(data["cameras"], list) and len(data["cameras"]) <= 32,
         "cameras must be a list of at most 32 entries",
     )
-    for key, maximum in (
-        ("profile_width", 16384),
-        ("profile_height", 16384),
-        ("profile_fps", 120),
-    ):
-        require(
-            type(data[key]) is int and 1 <= data[key] <= maximum,
-            key + " is outside its supported range",
-        )
-    require(
-        data["profile_codec"] in ("H264", "H265"), "profile_codec must be H264 or H265"
-    )
+    validate_profile(data)
     ports = {1984, 8554, 8555}
     if data["onvif_enabled"]:
         rtsp = parse_url(data["rtsp_base"], "rtsp_base")
@@ -127,16 +134,18 @@ def settings(options, config_root=Path("/config")):
         "-rtsp",
         data["rtsp_base"],
     ]
-    for key in ("profile_width", "profile_height", "profile_fps", "profile_codec"):
+    for key in PROFILE_FIELDS:
         command += ["-" + key.replace("_", "-"), str(data[key])]
     names = set()
     for camera in data["cameras"]:
         require(
             isinstance(camera, dict)
             and {"stream", "port"} <= camera.keys()
-            and not camera.keys() - {"stream", "rtsp_stream", "port"},
-            "each camera requires stream and port, with optional rtsp_stream",
+            and not camera.keys()
+            - ({"stream", "rtsp_stream", "port"} | set(PROFILE_FIELDS)),
+            "each camera requires stream and port, with optional rtsp_stream and profile fields",
         )
+        validate_profile(data | camera)
         name = stream_name(camera["stream"])
         target = stream_name(camera.get("rtsp_stream", name))
         port = camera["port"]
@@ -151,6 +160,13 @@ def settings(options, config_root=Path("/config")):
         ports.add(port)
         names.add(name)
         command += ["-camera", f"{name}=:{port},{target}"]
+        overrides = [
+            f"{key.removeprefix('profile_')}={camera[key]}"
+            for key in PROFILE_FIELDS
+            if key in camera
+        ]
+        if overrides:
+            command += ["-camera-profile", name + "=" + ",".join(overrides)]
     return {
         "options": data,
         "config": config,

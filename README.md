@@ -124,7 +124,29 @@ Movement calibration can be tuned without rebuilding:
 ```
 
 Profile values describe the RTSP stream to ONVIF clients; they do not transcode
-video. Run one bridge process per metadata profile when cameras differ.
+video. The global flags remain defaults for all cameras. Override any subset
+for a specific Xiaomi camera with `-camera-profile` (one flag per camera):
+
+```shell
+xiaomi-onvif \
+  -go2rtc=http://go2rtc:1984 \
+  -rtsp=rtsp://go2rtc:8554 \
+  -profile-width=1920 -profile-height=1080 -profile-fps=30 -profile-codec=H264 \
+  -camera=living=:8891,living_4k \
+  -camera=door=:8892,door_hd \
+  -camera=garage=:8893,garage_hd \
+  -camera-profile=living=width=3840,height=2160,fps=20,codec=H265 \
+  -camera-profile=door=fps=15
+```
+
+Here `living` advertises 3840x2160/20 fps/H265, `door` inherits 1920x1080/H264
+but uses 15 fps, and `garage` inherits all four defaults. `NAME` matches the
+control name in `-camera`, even when the returned RTSP stream has another name.
+The optional fields are `width`, `height`, `fps` and `codec`; omitted fields
+inherit independently. Invalid values, unknown camera names, duplicate fields
+and repeated overrides for the same camera are rejected before startup. The
+existing `-camera` syntax and global defaults remain unchanged. Overrides apply
+to Xiaomi bridge profiles; compatibility proxies keep the upstream metadata.
 
 Run `xiaomi-onvif -h` for the complete option list and
 `xiaomi-onvif -version` for build provenance.

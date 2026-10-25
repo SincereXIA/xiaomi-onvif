@@ -15,6 +15,8 @@ Versioning after the first public beta.
 - Frigate FOV-relative movement and movement-status compatibility.
 - Optional adapter for incomplete upstream ONVIF implementations.
 - Multi-camera command-line configuration and stream-name overrides.
+- Per-camera ONVIF video metadata overrides with global defaults for legacy
+  command-line and Home Assistant Add-on configurations.
 - Version metadata, public examples and release automation.
 
 ### Changed

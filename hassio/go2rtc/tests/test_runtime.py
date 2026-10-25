@@ -55,6 +55,9 @@ class RuntimeTests(unittest.TestCase):
         mapping = next(m for m in config["map"] if m["type"] == "homeassistant_config")
         self.assertEqual(mapping["path"], "/config")
         self.assertFalse(mapping["read_only"])
+        camera_schema = config["schema"]["cameras"][0]
+        for field in runtime.PROFILE_FIELDS:
+            self.assertTrue(camera_schema[field].endswith("?"))
 
     def test_disabled_bridge_has_no_command(self):
         self.assertIsNone(self.settings()["onvif"])
@@ -105,6 +108,93 @@ class RuntimeTests(unittest.TestCase):
         name = "camera $(touch /tmp/never-execute);`id`"
         config = self.enabled(cameras=[{"stream": name, "port": 8891}])
         self.assertEqual(config["onvif"][-1], f"{name}=:8891,{name}")
+
+    def test_legacy_cameras_use_only_global_profile_flags(self):
+        config = self.enabled(
+            profile_width=2560,
+            profile_height=1440,
+            profile_fps=25,
+            profile_codec="H265",
+        )
+        command = config["onvif"]
+        self.assertNotIn("-camera-profile", command)
+        for flag, value in [
+            ("-profile-width", "2560"),
+            ("-profile-height", "1440"),
+            ("-profile-fps", "25"),
+            ("-profile-codec", "H265"),
+        ]:
+            self.assertEqual(command[command.index(flag) + 1], value)
+
+    def test_mixed_camera_profiles_pass_only_explicit_overrides(self):
+        config = self.enabled(
+            profile_width=1920,
+            profile_height=1080,
+            profile_fps=30,
+            cameras=[
+                {
+                    "stream": "living",
+                    "rtsp_stream": "living_4k",
+                    "port": 8891,
+                    "profile_width": 3840,
+                    "profile_height": 2160,
+                    "profile_fps": 20,
+                    "profile_codec": "H265",
+                },
+                {"stream": "door", "port": 8892, "profile_fps": 15},
+                {"stream": "garage", "port": 8893},
+            ],
+        )
+        command = config["onvif"]
+        overrides = [
+            command[i + 1] for i, arg in enumerate(command) if arg == "-camera-profile"
+        ]
+        self.assertEqual(
+            overrides,
+            ["living=width=3840,height=2160,fps=20,codec=H265", "door=fps=15"],
+        )
+        self.assertIn("living=:8891,living_4k", command)
+        self.assertIn("garage=:8893,garage", command)
+        self.assertNotIn("profile_width", config["options"]["cameras"][1])
+
+    def test_each_camera_profile_field_can_be_overridden_alone(self):
+        for field, value in [
+            ("profile_width", 1920),
+            ("profile_height", 1080),
+            ("profile_fps", 15),
+            ("profile_codec", "H265"),
+        ]:
+            with self.subTest(field=field):
+                command = self.enabled(
+                    cameras=[{"stream": "c700", "port": 8891, field: value}]
+                )["onvif"]
+                self.assertEqual(
+                    command[-2:],
+                    [
+                        "-camera-profile",
+                        f"c700={field.removeprefix('profile_')}={value}",
+                    ],
+                )
+
+    def test_invalid_camera_profile_fields_are_rejected(self):
+        for field, value in [
+            ("profile_width", 0),
+            ("profile_width", 16385),
+            ("profile_height", -1),
+            ("profile_height", True),
+            ("profile_fps", 0),
+            ("profile_fps", 121),
+            ("profile_fps", 2.5),
+            ("profile_fps", "20"),
+            ("profile_codec", "AV1"),
+            ("profile_codec", None),
+            ("profile_width", None),
+        ]:
+            with (
+                self.subTest(field=field, value=value),
+                self.assertRaises(runtime.ConfigError),
+            ):
+                self.enabled(cameras=[{"stream": "c700", "port": 8891, field: value}])
 
     def test_ambiguous_stream_names_rejected(self):
         for name in ["", "a=b", "a,b", "a\n", "a\x00", "a\x7f", 42]:
