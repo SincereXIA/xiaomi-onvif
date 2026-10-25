@@ -1,5 +1,5 @@
 name: go2rtc with Xiaomi ONVIF
-version: "0.1.0"
+version: "0.1.1"
 slug: go2rtc_xiaomi
 description: go2rtc with Xiaomi camera support and an optional ONVIF bridge
 url: https://github.com/SincereXIA/xiaomi-onvif
@@ -44,6 +44,10 @@ schema:
     - stream: str
       rtsp_stream: str?
       port: port
+      profile_width: int(1,16384)?
+      profile_height: int(1,16384)?
+      profile_fps: int(1,120)?
+      profile_codec: list(H264|H265)?
   profile_width: int(1,16384)
   profile_height: int(1,16384)
   profile_fps: int(1,120)

@@ -7,9 +7,9 @@ installation on amd64 or aarch64. Home Assistant Container cannot install
 Add-ons. HAOS installation, Ingress, Supervisor watchdog, backup/restore and
 upgrade behavior have not yet been validated on a real HAOS system.
 
-The initial image `ghcr.io/sincerexia/xiaomi-onvif-addon:0.1.0` must be published
-and made public before the following store installation can work. No image is
-published merely by opening or merging this implementation PR.
+Per-camera profile overrides require version 0.1.1 or a source build containing
+that change. The published 0.1.0 image supports only the global profile fields.
+A new image must be released before the new fields can be used from the store.
 
 ## Migrate from AlexxIT's go2rtc Add-on
 
@@ -79,10 +79,50 @@ profile_codec: H264
   custom go2rtc listeners. Default go2rtc ports and the configured RTSP port are
   rejected automatically. Stream names cannot contain commas, equals signs or
   control characters because the bridge CLI uses those as separators.
-- `profile_width`, `profile_height`, `profile_fps`, `profile_codec`: metadata
-  advertised by the bridge, shared by all configured cameras. Set these to the
-  actual returned stream properties. They do not change encoding. Codec is
-  `H264` or `H265`; defaults are 3840x2160, 20 fps, H264.
+- Global `profile_width`, `profile_height`, `profile_fps`, `profile_codec`:
+  default ONVIF metadata for cameras that omit the corresponding fields.
+  Existing configurations keep their original behavior. Defaults are
+  3840x2160, 20 fps, H264.
+- `cameras[].profile_width`, `cameras[].profile_height`, `cameras[].profile_fps`,
+  `cameras[].profile_codec`: optional overrides for that camera only. Each
+  omitted field inherits its global value independently. Width/height must be
+  integers in 1-16384, frame rate in 1-120, and codec must be `H264` or `H265`.
+  Explicit zero, null and unsupported values are rejected, not treated as
+  inheritance. These values describe the returned RTSP stream, including an
+  optional `rtsp_stream` rendition. They do not resize or transcode video.
+
+Different cameras can share one bridge process while reporting different video
+properties. For example:
+
+```yaml
+config_path: /config/go2rtc.yaml
+api_url: http://127.0.0.1:1984
+onvif_enabled: true
+rtsp_base: rtsp://192.168.1.10:8554
+profile_width: 1920
+profile_height: 1080
+profile_fps: 30
+profile_codec: H264
+cameras:
+  - stream: living
+    rtsp_stream: living_4k
+    port: 8891
+    profile_width: 3840
+    profile_height: 2160
+    profile_fps: 20
+    profile_codec: H265
+  - stream: door
+    port: 8892
+    profile_fps: 15
+  - stream: garage
+    port: 8893
+```
+
+`living` advertises 3840x2160/20 fps/H265, `door` advertises
+1920x1080/15 fps/H264, and `garage` inherits 1920x1080/30 fps/H264. All stream
+names must already exist in go2rtc. Each camera keeps its own ONVIF port, and
+all three SOAP methods (`GetProfiles`, `GetProfile`, `GetVideoSources`) use that
+camera's resolved values. No existing go2rtc configuration is rewritten.
 
 Add each camera to Home Assistant using the HAOS host address and its configured
 ONVIF port. This version implements the Xiaomi bridge, not the separate generic
@@ -129,7 +169,8 @@ python3 hassio/go2rtc/tests/smoke.py xiaomi-onvif-addon:test
 
 Smoke tests use isolated Docker bridge networks, temporary options and an empty
 stream configuration. They check API/bridge readiness, SOAP stream URIs, disabled
-ONVIF, preservation of existing YAML, graceful stop, failure propagation and
+ONVIF, mixed camera profiles, per-field/default inheritance, preservation of
+existing YAML, graceful stop, failure propagation and
 redacted option errors. They never connect to real cameras or require Supervisor.
 Run Docker commands on the machine hosting the Docker daemon so fixture bind
 mounts refer to the correct filesystem. CI repeats these tests on native amd64

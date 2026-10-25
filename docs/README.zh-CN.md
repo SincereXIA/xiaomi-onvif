@@ -102,7 +102,19 @@ NAME=LISTEN_ADDR[,STREAM]
 -profile-codec              默认 H264
 ```
 
-Profile 参数用于向 ONVIF 客户端描述 RTSP 视频流，并不会转码。当摄像头的媒体参数不同时，应为每一种媒体配置运行独立的网桥进程。
+Profile 参数用于向 ONVIF 客户端描述 RTSP 视频流，并不会转码。全局参数仍作为默认值；可通过 `-camera-profile` 为每台小米摄像头独立覆盖分辨率、帧率和编码，省略的字段分别继承全局值：
+
+```shell
+xiaomi-onvif \
+  -profile-width=1920 -profile-height=1080 -profile-fps=30 -profile-codec=H264 \
+  -camera=living=:8891,living_4k \
+  -camera=door=:8892,door_hd \
+  -camera=garage=:8893,garage_hd \
+  -camera-profile=living=width=3840,height=2160,fps=20,codec=H265 \
+  -camera-profile=door=fps=15
+```
+
+上例中，`living` 使用 3840×2160、20 fps、H265，`door` 使用 1920×1080、15 fps、H264，`garage` 继承全部全局值。覆盖项中的名称对应 `-camera` 的控制名称，每台摄像头最多设置一个 `-camera-profile`。旧版 `-camera` 语法和默认值保持兼容。Add-on 0.1.1 及包含此修改的源码版本也支持在 `cameras` 条目中填写可选的 `profile_width`、`profile_height`、`profile_fps`、`profile_codec`，详见 [Add-on 配置文档](../hassio/go2rtc/DOCS.md)。
 
 运行 `xiaomi-onvif -h` 查看完整参数列表，运行 `xiaomi-onvif -version` 查看构建来源。
 

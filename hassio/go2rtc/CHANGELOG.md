@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Allow each camera to override ONVIF width, height, frame rate and codec.
+- Inherit omitted camera profile fields from the existing global defaults.
+- Verify mixed profiles and legacy defaults through SOAP container tests.
+
 ## 0.1.0
 
 - Add an experimental amd64/aarch64 Home Assistant Add-on.

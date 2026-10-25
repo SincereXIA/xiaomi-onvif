@@ -84,17 +84,53 @@ def main():
                 {
                     "onvif_enabled": True,
                     "rtsp_base": "rtsp://192.0.2.10:8554",
+                    "profile_width": 1920,
+                    "profile_height": 1080,
+                    "profile_fps": 30,
                     "cameras": [
-                        {"stream": "c700", "rtsp_stream": "c700_h264", "port": 8891}
+                        {
+                            "stream": "c700",
+                            "rtsp_stream": "c700_4k",
+                            "port": 8891,
+                            "profile_width": 3840,
+                            "profile_height": 2160,
+                            "profile_fps": 20,
+                            "profile_codec": "H265",
+                        },
+                        {"stream": "door", "port": 8892, "profile_fps": 15},
+                        {"stream": "garage", "port": 8893},
                     ],
                 },
             )
             wait_for(lambda: healthy(name), "go2rtc and ONVIF readiness")
             probe = """import urllib.request
-body = b'<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><GetStreamUri xmlns="http://www.onvif.org/ver10/media/wsdl"/></s:Body></s:Envelope>'
-req = urllib.request.Request('http://127.0.0.1:8891/onvif/media_service', data=body, headers={'Content-Type':'application/soap+xml'})
-with urllib.request.urlopen(req, timeout=3) as response:
-    assert b'rtsp://192.0.2.10:8554/c700_h264' in response.read()
+import xml.etree.ElementTree as ET
+ns = {'tt': 'http://www.onvif.org/ver10/schema'}
+def soap(port, action):
+    body = f'<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><{action} xmlns="http://www.onvif.org/ver10/media/wsdl"/></s:Body></s:Envelope>'.encode()
+    req = urllib.request.Request(f'http://127.0.0.1:{port}/onvif/media_service', data=body, headers={'Content-Type':'application/soap+xml'})
+    with urllib.request.urlopen(req, timeout=3) as response:
+        return ET.fromstring(response.read())
+# Repeat in a different order to detect profile leakage between listeners.
+for port, stream, width, height, fps, codec in [
+    (8891, 'c700_4k', 3840, 2160, 20, 'H265'),
+    (8892, 'door', 1920, 1080, 15, 'H264'),
+    (8893, 'garage', 1920, 1080, 30, 'H264'),
+    (8891, 'c700_4k', 3840, 2160, 20, 'H265'),
+]:
+    uri = soap(port, 'GetStreamUri')
+    assert uri.find('.//tt:Uri', ns).text == f'rtsp://192.0.2.10:8554/{stream}'
+    for action in ['GetProfiles', 'GetProfile', 'GetVideoSources']:
+        root = soap(port, action)
+        assert root.find('.//tt:Width', ns).text == str(width)
+        assert root.find('.//tt:Height', ns).text == str(height)
+        if action == 'GetVideoSources':
+            assert root.find('.//tt:Framerate', ns).text == str(fps)
+        else:
+            assert root.find('.//tt:FrameRateLimit', ns).text == str(fps)
+            assert root.find('.//tt:Encoding', ns).text == codec
+            bounds = root.find('.//tt:Bounds', ns)
+            assert bounds.get('width') == str(width) and bounds.get('height') == str(height)
 """
             docker("exec", name, "python3", "-c", probe)
             assert source.read_text() == original, (
@@ -103,7 +139,7 @@ with urllib.request.urlopen(req, timeout=3) as response:
             docker("stop", "--time", "15", name)
             assert inspect(name, ".State.ExitCode") == "0", "Shutdown was not graceful"
             print(
-                "PASS: enabled bridge, API/health, SOAP stream URI, config preservation, graceful stop"
+                "PASS: mixed camera profiles, partial/default inheritance, SOAP methods and RTSP URIs, config preservation, graceful stop"
             )
 
             name = start("disabled", {})
