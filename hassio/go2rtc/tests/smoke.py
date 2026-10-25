@@ -159,14 +159,23 @@ with urllib.request.urlopen(req, timeout=3) as response:
             source.unlink()
             name = start("generated", {})
             wait_for(lambda: healthy(name), "startup with a missing config file")
-            assert source.read_text() == "streams: {}\n"
-            assert source.stat().st_mode & 0o777 == 0o600
+            # Container root owns this private file; the CI runner cannot read it.
+            docker(
+                "exec",
+                name,
+                "python3",
+                "-c",
+                "from pathlib import Path; p=Path('/config/go2rtc.yaml'); "
+                "assert p.read_text() == 'streams: {}\\n'; "
+                "assert p.stat().st_mode & 0o777 == 0o600",
+            )
             docker("stop", "--time", "15", name)
             assert inspect(name, ".State.ExitCode") == "0"
             print(
                 "PASS: missing configuration is created privately and starts successfully"
             )
 
+            source.unlink()
             source.write_text(
                 original.replace(
                     "  listen: ':1984'",
