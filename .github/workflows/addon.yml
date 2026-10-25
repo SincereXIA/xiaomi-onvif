@@ -1,0 +1,107 @@
+name: Home Assistant Add-on
+
+on:
+  pull_request:
+    paths:
+      - "hassio/**"
+      - "docker/Dockerfile.addon"
+      - "repository.yaml"
+      - ".github/workflows/addon.yml"
+      - "go.mod"
+      - "go.sum"
+      - "**/*.go"
+  push:
+    tags: ["addon-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  options:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -r hassio/go2rtc/tests/requirements.txt
+      - run: python -m unittest discover -s hassio/go2rtc/tests -v
+      - name: Check release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          python - <<'PY'
+          import os
+          import yaml
+          with open("hassio/go2rtc/config.yaml") as source:
+              version = yaml.safe_load(source)["version"]
+          assert os.environ["GITHUB_REF_NAME"] == "addon-v" + version
+          PY
+
+  image:
+    needs: options
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - name: Build test image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.addon
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: xiaomi-onvif-addon:test
+          build-args: |
+            VERSION=test
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=addon-${{ matrix.runner }}
+          cache-to: type=gha,scope=addon-${{ matrix.runner }},mode=max
+      - run: python3 hassio/go2rtc/tests/smoke.py xiaomi-onvif-addon:test
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/addon-v')
+    needs: [options, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - id: release
+        name: Image name and version
+        shell: bash
+        run: |
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-addon" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#addon-v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.addon
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.release.outputs.image }}:${{ steps.release.outputs.version }}
+          build-args: |
+            VERSION=${{ steps.release.outputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+          cache-from: |
+            type=gha,scope=addon-ubuntu-latest
+            type=gha,scope=addon-ubuntu-24.04-arm
+          provenance: mode=max
+          sbom: true

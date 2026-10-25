@@ -1,0 +1,50 @@
+name: go2rtc with Xiaomi ONVIF
+version: "0.1.0"
+slug: go2rtc_xiaomi
+description: go2rtc with Xiaomi camera support and an optional ONVIF bridge
+url: https://github.com/SincereXIA/xiaomi-onvif
+image: ghcr.io/sincerexia/xiaomi-onvif-addon
+arch:
+  - amd64
+  - aarch64
+stage: experimental
+startup: system
+boot: manual
+init: false
+host_network: true
+homeassistant_api: true
+video: true
+audio: true
+ingress: true
+ingress_port: 1984
+panel_icon: mdi:cctv
+watchdog: tcp://[HOST]:1984
+map:
+  - type: homeassistant_config
+    path: /config
+    read_only: false
+  - type: media
+  - type: ssl
+options:
+  config_path: /config/go2rtc.yaml
+  api_url: http://127.0.0.1:1984
+  onvif_enabled: false
+  rtsp_base: ""
+  cameras: []
+  profile_width: 3840
+  profile_height: 2160
+  profile_fps: 20
+  profile_codec: H264
+schema:
+  config_path: str
+  api_url: str
+  onvif_enabled: bool
+  rtsp_base: str
+  cameras:
+    - stream: str
+      rtsp_stream: str?
+      port: port
+  profile_width: int(1,16384)
+  profile_height: int(1,16384)
+  profile_fps: int(1,120)
+  profile_codec: list(H264|H265)

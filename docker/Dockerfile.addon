@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+ARG GO_VERSION=1.26.10
+ARG BUILD_FROM=ghcr.io/home-assistant/base:3.24@sha256:992dc6a5727b97a30da8dd259b489739299c324407557df540165e2f0dbb7763
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS build
+ARG TARGETOS TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=none
+ARG BUILD_DATE=unknown
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags "-s -w" -o /out/go2rtc . && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_DATE}" \
+    -o /out/xiaomi-onvif ./cmd/xiaomi-onvif
+
+FROM ${BUILD_FROM}
+ARG TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=none
+LABEL io.hass.type="addon" \
+    io.hass.name="go2rtc with Xiaomi ONVIF" \
+    io.hass.version="${VERSION}" \
+    org.opencontainers.image.source="https://github.com/SincereXIA/xiaomi-onvif" \
+    org.opencontainers.image.revision="${COMMIT}"
+RUN apk add --no-cache python3 ffmpeg ffplay alsa-plugins-pulse font-droid && \
+    if [ "$TARGETARCH" = amd64 ]; then apk add --no-cache libva-intel-driver intel-media-driver; fi
+COPY --from=build /out/ /usr/local/bin/
+COPY hassio/go2rtc/rootfs/ /
+WORKDIR /config
+EXPOSE 1984 8554 8555 8555/udp
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s \
+    CMD ["python3", "/usr/local/bin/xiaomi-addon.py", "health"]
+# Keep the Home Assistant base image's /init entrypoint and load Supervisor env.
+CMD ["/command/with-contenv", "python3", "/usr/local/bin/xiaomi-addon.py", "run"]
