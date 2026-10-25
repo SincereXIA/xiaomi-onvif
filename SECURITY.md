@@ -23,3 +23,9 @@ reproduction. You should receive an acknowledgement within seven days.
 The ONVIF and go2rtc control APIs are designed for trusted local networks and
 may move physical camera hardware. Keep them behind a firewall or isolated
 container network. They must not be exposed directly to the public Internet.
+
+Limit access to control ports to the specific Frigate or Home Assistant hosts
+that need them, including on a shared LAN. Bind the go2rtc management port to
+loopback when it is only used locally, for example `127.0.0.1:1984:1984` in
+Compose. Camera transport input validation does not add authentication to
+ONVIF or replace network access controls.

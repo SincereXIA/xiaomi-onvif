@@ -99,3 +99,20 @@ POST /api/xiaomi/presets?src=xiaomi1&token=1
 
 These APIs are consumed by the bundled `xiaomi-onvif` bridge. Keep the go2rtc
 API on a trusted local or container network.
+
+## CS2 input limits
+
+After discovery, CS2 UDP packets must come from the camera IP and port learned
+during the handshake. Malformed transport headers and incomplete command or
+media frames are rejected instead of being passed to the consumer.
+
+Each reassembled frame is limited to 16 MiB. Each channel reserves at most
+32 MiB across its incomplete frame and queued frames; the reservation is
+released when a frame is consumed or discarded. UDP reordering remains limited
+to 250 packets. Exceeding a frame or byte limit closes the camera connection so
+the normal stream reconnect path can recover it.
+
+TCP media backpressure still waits for the consumer, with a ten-second timeout
+and cancellation when the connection closes. These limits do not authenticate
+the control APIs. Restrict their listeners to trusted clients as described in
+[the security policy](../../SECURITY.md).

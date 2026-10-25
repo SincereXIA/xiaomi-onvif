@@ -25,7 +25,7 @@ func Dial(host, transport string) (*Conn, error) {
 		isTCP: isTCP,
 		done:  make(chan struct{}),
 		channels: [4]*dataChannel{
-			newDataChannel(0, 10), nil, newDataChannel(250, 100), nil,
+			newDataChannel(0, 10, 4), nil, newDataChannel(250, 100, hdrSize), nil,
 		},
 	}
 	go c.worker()
@@ -52,7 +52,9 @@ type Conn struct {
 func (c *Conn) Close() error {
 	var err error
 	c.closeOnce.Do(func() {
-		close(c.done)
+		if c.done != nil {
+			close(c.done)
+		}
 		err = c.Conn.Close()
 	})
 	return err
@@ -72,6 +74,10 @@ const (
 	msgPong      = 0xE1
 	msgClose     = 0xF0
 	msgCloseAck  = 0xF1
+
+	maxPacketSize   = 1200
+	maxFrameSize    = 16 << 20
+	maxBufferedSize = 32 << 20
 )
 
 func handshake(host, transport string) (net.Conn, error) {
@@ -121,13 +127,14 @@ func handshake(host, transport string) (net.Conn, error) {
 
 func (c *Conn) worker() {
 	defer func() {
+		_ = c.Close()
 		c.channels[0].Close()
 		c.channels[2].Close()
 	}()
 
 	var keepaliveTS time.Time // only for TCP
 
-	buf := make([]byte, 1200)
+	buf := make([]byte, maxPacketSize)
 
 	for {
 		n, err := c.Conn.Read(buf)
@@ -135,15 +142,18 @@ func (c *Conn) worker() {
 			c.err = fmt.Errorf("%s: %w", "cs2", err)
 			return
 		}
+		if n < 4 || buf[0] != magic || int(binary.BigEndian.Uint16(buf[2:4])) != n-4 {
+			continue
+		}
 
 		// 0  f1d0  magic
-		// 2  005d  size = total size + 4
+		// 2  005d  size = total size - 4
 		// 4  d1    magic
 		// 5  00    channel
 		// 6  0000  seq
 		switch buf[1] {
 		case msgDrw:
-			if n < 8 {
+			if n < 8 || buf[4] != magicDrw {
 				continue
 			}
 			ch := buf[5]
@@ -220,6 +230,9 @@ func (c *Conn) ReadCommand() (cmd uint32, data []byte, err error) {
 	if !ok {
 		return 0, nil, c.Error()
 	}
+	if len(buf) < 4 {
+		return 0, nil, fmt.Errorf("cs2: command frame is too short")
+	}
 	cmd = binary.LittleEndian.Uint32(buf)
 	data = buf[4:]
 	return
@@ -269,6 +282,9 @@ func (c *Conn) ReadPacket() (hdr, payload []byte, err error) {
 	data, ok := c.channels[2].Pop()
 	if !ok {
 		return nil, nil, c.Error()
+	}
+	if len(data) < hdrSize {
+		return nil, nil, fmt.Errorf("cs2: media frame is too short")
 	}
 	return data[:hdrSize], data[hdrSize:], nil
 }
@@ -348,7 +364,7 @@ func (c *udpConn) Read(b []byte) (n int, err error) {
 			return 0, err
 		}
 
-		if string(addr.IP) == string(c.addr.IP) || n >= 8 {
+		if addr.IP.Equal(c.addr.IP) && addr.Port == c.addr.Port && n >= 4 {
 			//log.Printf("<- %x", b[:n])
 			return
 		}
@@ -381,7 +397,7 @@ func (c *udpConn) WriteUntil(req []byte, ok func(res []byte) bool) ([]byte, erro
 			return nil, err
 		}
 
-		if string(addr.IP) != string(c.addr.IP) || n < 16 {
+		if !addr.IP.Equal(c.addr.IP) || n < 16 || buf[0] != magic {
 			continue // skip messages from another IP
 		}
 
@@ -411,8 +427,8 @@ func (c *tcpConn) Read(p []byte) (n int, err error) {
 		return
 	}
 	n = int(binary.BigEndian.Uint16(tmp))
-	if len(p) < n {
-		return 0, fmt.Errorf("tcp: buffer too small")
+	if tmp[2] != magicTCP || n < 4 || n > len(p) {
+		return 0, fmt.Errorf("tcp: invalid packet header")
 	}
 	_, err = io.ReadFull(c.rd, p[:n])
 	//log.Printf("<- %x%x", tmp, p[:n])
@@ -430,8 +446,12 @@ func (c *tcpConn) Write(req []byte) (n int, err error) {
 	return
 }
 
-func newDataChannel(pushSize, popSize int) *dataChannel {
-	c := &dataChannel{}
+func newDataChannel(pushSize, popSize, minFrameSize int) *dataChannel {
+	c := &dataChannel{
+		minFrameSize: minFrameSize,
+		frameLimit:   maxFrameSize,
+		bufferLimit:  maxBufferedSize,
+	}
 	if pushSize > 0 {
 		c.pushBuf = make(map[uint16][]byte, pushSize)
 		c.pushSize = pushSize
@@ -450,6 +470,11 @@ type dataChannel struct {
 	waitData []byte
 	waitSize int
 	popBuf   chan []byte
+
+	minFrameSize int
+	frameLimit   int
+	bufferLimit  int
+	bufferedSize atomic.Int64
 }
 
 func (c *dataChannel) Push(b []byte) error {
@@ -457,48 +482,96 @@ func (c *dataChannel) Push(b []byte) error {
 }
 
 func (c *dataChannel) push(b []byte, done <-chan struct{}) error {
-	c.waitData = append(c.waitData, b...)
-
-	for len(c.waitData) > 4 {
-		// Every new data starts with size. There can be several data inside one packet.
+	for len(b) > 0 {
 		if c.waitSize == 0 {
-			c.waitSize = int(binary.BigEndian.Uint32(c.waitData))
-			c.waitData = c.waitData[4:]
-		}
-		if c.waitSize > len(c.waitData) {
-			break
+			n := min(4-len(c.waitData), len(b))
+			c.waitData = append(c.waitData, b[:n]...)
+			b = b[n:]
+			if len(c.waitData) < 4 {
+				return nil
+			}
+
+			// Validate the network length before converting to int or allocating.
+			size := binary.BigEndian.Uint32(c.waitData)
+			if size < uint32(c.minFrameSize) || size > uint32(c.frameLimit) {
+				return fmt.Errorf("invalid frame size %d", size)
+			}
+			if !c.reserve(int(size)) {
+				return fmt.Errorf("frame buffer limit exceeded")
+			}
+			c.waitSize = int(size)
+			c.waitData = make([]byte, 0, c.waitSize)
 		}
 
-		select {
-		case c.popBuf <- c.waitData[:c.waitSize]:
-		default:
-			if done == nil {
-				return fmt.Errorf("pop buffer is full")
-			}
-			timer := time.NewTimer(10 * time.Second)
-			select {
-			case c.popBuf <- c.waitData[:c.waitSize]:
-				timer.Stop()
-			case <-done:
-				timer.Stop()
-				return net.ErrClosed
-			case <-timer.C:
-				return fmt.Errorf("media consumer stalled")
-			}
+		n := min(c.waitSize-len(c.waitData), len(b))
+		c.waitData = append(c.waitData, b[:n]...)
+		b = b[n:]
+		if len(c.waitData) < c.waitSize {
+			continue
 		}
 
-		c.waitData = c.waitData[c.waitSize:]
+		// Each queued frame owns its allocation, so small frames cannot retain
+		// a much larger reassembly buffer after other frames have been consumed.
+		if err := c.deliver(c.waitData, done); err != nil {
+			c.bufferedSize.Add(-int64(c.waitSize))
+			c.waitData = nil
+			c.waitSize = 0
+			return err
+		}
+		c.waitData = nil
 		c.waitSize = 0
 	}
 	return nil
 }
 
+func (c *dataChannel) reserve(size int) bool {
+	for {
+		buffered := c.bufferedSize.Load()
+		if int64(size) > int64(c.bufferLimit)-buffered {
+			return false
+		}
+		if c.bufferedSize.CompareAndSwap(buffered, buffered+int64(size)) {
+			return true
+		}
+	}
+}
+
+func (c *dataChannel) deliver(frame []byte, done <-chan struct{}) error {
+	select {
+	case c.popBuf <- frame:
+		return nil
+	default:
+		if done == nil {
+			return fmt.Errorf("pop buffer is full")
+		}
+		timer := time.NewTimer(10 * time.Second)
+		defer timer.Stop()
+		select {
+		case c.popBuf <- frame:
+			return nil
+		case <-done:
+			return net.ErrClosed
+		case <-timer.C:
+			return fmt.Errorf("media consumer stalled")
+		}
+	}
+}
+
 func (c *dataChannel) Pop() ([]byte, bool) {
 	data, ok := <-c.popBuf
+	if ok {
+		c.bufferedSize.Add(-int64(len(data)))
+	}
 	return data, ok
 }
 
 func (c *dataChannel) Close() {
+	if c.waitSize > 0 {
+		c.bufferedSize.Add(-int64(c.waitSize))
+	}
+	c.waitData = nil
+	c.waitSize = 0
+	c.pushBuf = nil
 	close(c.popBuf)
 }
 
