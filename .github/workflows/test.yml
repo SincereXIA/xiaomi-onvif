@@ -20,22 +20,22 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
-          go-version: 1.26.5
+          go-version: 1.26.10
           cache: true
       - name: Format check
-        run: test -z "$(gofmt -l cmd/xiaomi-onvif internal/xiaomi pkg/xiaomi/miss)"
+        run: test -z "$(gofmt -l cmd/xiaomi-onvif internal/xiaomi pkg/xiaomi)"
       - name: Build all packages
         run: go build ./...
       - name: Test modified components
-        run: go test ./cmd/xiaomi-onvif ./internal/xiaomi ./pkg/xiaomi/miss
+        run: go test ./cmd/xiaomi-onvif ./internal/xiaomi ./pkg/xiaomi/...
       - name: Race tests
-        run: go test -race ./cmd/xiaomi-onvif ./internal/xiaomi ./pkg/xiaomi/miss
+        run: go test -race ./cmd/xiaomi-onvif ./internal/xiaomi ./pkg/xiaomi/...
       - name: Vet modified components
-        run: go vet ./cmd/xiaomi-onvif ./internal/xiaomi ./pkg/xiaomi/miss
+        run: go vet ./cmd/xiaomi-onvif ./internal/xiaomi ./pkg/xiaomi/...
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: Vulnerability scan
-        run: govulncheck ./cmd/xiaomi-onvif ./internal/xiaomi ./pkg/xiaomi/miss
+        run: govulncheck ./cmd/xiaomi-onvif ./internal/xiaomi ./pkg/xiaomi/...
       - name: Build binaries
         env:
           CGO_ENABLED: 0

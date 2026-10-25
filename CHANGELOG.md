@@ -24,5 +24,9 @@ Versioning after the first public beta.
 
 ### Security
 
+- Validate CS2 UDP peers and transport headers, bound reassembled and queued
+  frame data, and reject short command, media and encrypted payloads safely.
+- Cover Xiaomi transport and crypto subpackages in CI tests and race checks.
+- Build with Go 1.26.10 to include current Go standard library security fixes.
 - Added bounded SOAP request bodies, HTTP server timeouts and validated
   forwarded host handling.
