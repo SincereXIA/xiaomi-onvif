@@ -82,6 +82,14 @@ See:
 - [Compose example](examples/xiaomi-onvif/compose.yaml)
 - [Frigate example](examples/xiaomi-onvif/frigate.yaml)
 
+## Home Assistant Add-on (experimental)
+
+An Add-on for amd64/aarch64 packages both programs, preserves your existing
+`go2rtc.yaml`, and provides an optional ONVIF bridge with Ingress metadata.
+See the [installation and migration guide](hassio/go2rtc/DOCS.md). The initial
+Add-on image must be published before store installation; real HAOS validation
+is still pending.
+
 ## Command-line configuration
 
 Expose a Xiaomi stream as an ONVIF camera:

@@ -12,3 +12,4 @@ node_modules
 website/.vitepress/cache
 website/.vitepress/dist
 examples/xiaomi-onvif/*.local.yaml
+**/__pycache__
