@@ -37,3 +37,15 @@ updated.
 Hardware-dependent changes must describe the tested model, firmware and a safe
 rollback path. Do not commit camera captures or configuration containing user
 data.
+
+ONVIF protocol changes must also pass the actual Home Assistant client handshake:
+
+```shell
+python3 -m venv /tmp/xiaomi-onvif-client-tests
+/tmp/xiaomi-onvif-client-tests/bin/pip install -r tests/onvif/requirements.txt
+go build -trimpath -o /tmp/xiaomi-onvif-ha-test ./cmd/xiaomi-onvif
+/tmp/xiaomi-onvif-client-tests/bin/python -W error::ResourceWarning -m unittest discover -s tests/onvif -v
+```
+
+Use Python 3.14 to match the CI environment. See [the client test guide](tests/onvif/README.md)
+for the covered HA calls and the limits of this protocol-only validation.

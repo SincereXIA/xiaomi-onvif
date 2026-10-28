@@ -105,19 +105,28 @@ def main():
             wait_for(lambda: healthy(name), "go2rtc and ONVIF readiness")
             probe = """import urllib.request
 import xml.etree.ElementTree as ET
-ns = {'tt': 'http://www.onvif.org/ver10/schema'}
-def soap(port, action):
-    body = f'<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><{action} xmlns="http://www.onvif.org/ver10/media/wsdl"/></s:Body></s:Envelope>'.encode()
-    req = urllib.request.Request(f'http://127.0.0.1:{port}/onvif/media_service', data=body, headers={'Content-Type':'application/soap+xml'})
+ns = {'tt': 'http://www.onvif.org/ver10/schema', 'trt': 'http://www.onvif.org/ver10/media/wsdl'}
+def soap(port, action, service='media', namespace='http://www.onvif.org/ver10/media/wsdl'):
+    body = f'<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><{action} xmlns="{namespace}"/></s:Body></s:Envelope>'.encode()
+    req = urllib.request.Request(f'http://127.0.0.1:{port}/onvif/{service}_service', data=body, headers={'Content-Type':'application/soap+xml'})
     with urllib.request.urlopen(req, timeout=3) as response:
         return ET.fromstring(response.read())
 # Repeat in a different order to detect profile leakage between listeners.
+identities = {}
 for port, stream, width, height, fps, codec in [
     (8891, 'c700_4k', 3840, 2160, 20, 'H265'),
     (8892, 'door', 1920, 1080, 15, 'H264'),
     (8893, 'garage', 1920, 1080, 30, 'H264'),
     (8891, 'c700_4k', 3840, 2160, 20, 'H265'),
 ]:
+    network = soap(port, 'GetNetworkInterfaces', 'device', 'http://www.onvif.org/ver10/device/wsdl')
+    mac = network.find('.//tt:HwAddress', ns).text
+    assert int(mac.split(':')[0], 16) & 3 == 2
+    assert identities.setdefault(port, mac) == mac
+    assert len(set(identities.values())) == len(identities)
+    caps = soap(port, 'GetServiceCapabilities').find('.//trt:Capabilities', ns)
+    assert caps.get('SnapshotUri') == 'false' and caps.get('MoveStatus') is None
+    assert caps.find('trt:ProfileCapabilities', ns).get('MaximumNumberOfProfiles') == '1'
     uri = soap(port, 'GetStreamUri')
     assert uri.find('.//tt:Uri', ns).text == f'rtsp://192.0.2.10:8554/{stream}'
     for action in ['GetProfiles', 'GetProfile', 'GetVideoSources']:
@@ -139,7 +148,7 @@ for port, stream, width, height, fps, codec in [
             docker("stop", "--time", "15", name)
             assert inspect(name, ".State.ExitCode") == "0", "Shutdown was not graceful"
             print(
-                "PASS: mixed camera profiles, partial/default inheritance, SOAP methods and RTSP URIs, config preservation, graceful stop"
+                "PASS: unique virtual identities, Media capabilities, mixed profiles, RTSP URIs, config preservation, graceful stop"
             )
 
             name = start("disabled", {})

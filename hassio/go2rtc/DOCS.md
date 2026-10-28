@@ -129,6 +129,30 @@ ONVIF port. This version implements the Xiaomi bridge, not the separate generic
 ONVIF compatibility-proxy mode. No model allowlist is added; other Xiaomi MISS
 models can be tried, but their video, motor operations and presets need testing.
 
+## Home Assistant ONVIF initialization
+
+The GetNetworkInterfaces fix requires version 0.1.2 or a source build containing
+that change. Version 0.1.1 returns ActionNotSupported for that request.
+
+Each virtual camera reports an enabled `onvif0` interface with a deterministic,
+locally administered unicast MAC derived from its `stream` control name. This
+is a virtual endpoint identity, not the physical Xiaomi camera's MAC or the
+HAOS host's network configuration. Keep control names stable and unique among
+cameras exposed to the same HA instance, including separate bridge processes.
+Changing only the listener port or host address does not change that identity.
+
+Device, Media and PTZ service capabilities are returned separately. The bridge
+declares ONVIF snapshot URIs unsupported (`SnapshotUri=false`), allowing HA's
+FFmpeg snapshot fallback. JPEG availability through go2rtc does not imply an
+ONVIF snapshot service. Event and Imaging services are not advertised.
+
+HA's ONVIF integration still requires a real H264 stream/profile. Preserve your
+working H265 stream for existing clients and use an actual H264 rendition if
+needed for HA. Setting `profile_codec: H264` only changes metadata, not the
+video encoding. No stream configuration is rewritten or transcoded by this fix.
+The client regression tests exercise HA's initialization calls against mock
+cameras, not a running HAOS instance or physical European C700 hardware.
+
 ## Network access and lifecycle
 
 Host networking is necessary for the camera connections and advertised ONVIF

@@ -235,7 +235,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	action, err := requestAction(body)
+	operation, err := requestOperation(body)
 	if err != nil {
 		p.soapFault(w, "ter:InvalidArgVal", err.Error())
 		return
@@ -247,7 +247,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var response string
-	switch action {
+	switch action := operation.Local; action {
 	case "GetCapabilities":
 		response = p.getCapabilities(host)
 	case "GetServices":
@@ -256,6 +256,8 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		response = fmt.Sprintf(`<tds:GetDeviceInformationResponse><tds:Manufacturer>Xiaomi</tds:Manufacturer><tds:Model>go2rtc PTZ proxy</tds:Model><tds:FirmwareVersion>1</tds:FirmwareVersion><tds:SerialNumber>%s</tds:SerialNumber><tds:HardwareId>xiaomi</tds:HardwareId></tds:GetDeviceInformationResponse>`, xmlEscape(p.name))
 	case "GetSystemDateAndTime":
 		response = systemDateAndTime()
+	case "GetNetworkInterfaces":
+		response = p.getNetworkInterfaces()
 	case "GetProfiles":
 		response = p.getProfiles()
 	case "GetProfile":
@@ -271,7 +273,12 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "GetServiceCapabilities":
-		response = `<tptz:GetServiceCapabilitiesResponse><tptz:Capabilities EFlip="false" Reverse="false" GetCompatibleConfigurations="false" MoveStatus="true" StatusPosition="false"/></tptz:GetServiceCapabilitiesResponse>`
+		var supported bool
+		response, supported = serviceCapabilities(operation.Space, r.URL.Path)
+		if !supported {
+			p.soapFault(w, "ter:ActionNotSupported", "unsupported service capabilities")
+			return
+		}
 	case "GetConfiguration":
 		response = p.getPTZConfiguration("GetConfigurationResponse", "PTZConfiguration")
 	case "GetConfigurations":
@@ -610,6 +617,11 @@ func setPanTiltMoveStatus(body []byte, status string) []byte {
 }
 
 func requestAction(body []byte) (string, error) {
+	operation, err := requestOperation(body)
+	return operation.Local, err
+}
+
+func requestOperation(body []byte) (xml.Name, error) {
 	decoder := xml.NewDecoder(strings.NewReader(string(body)))
 	inBody := false
 	for {
@@ -618,7 +630,7 @@ func requestAction(body []byte) (string, error) {
 			break
 		}
 		if err != nil {
-			return "", fmt.Errorf("invalid SOAP XML: %w", err)
+			return xml.Name{}, fmt.Errorf("invalid SOAP XML: %w", err)
 		}
 		switch element := token.(type) {
 		case xml.StartElement:
@@ -627,7 +639,7 @@ func requestAction(body []byte) (string, error) {
 				continue
 			}
 			if inBody {
-				return element.Name.Local, nil
+				return element.Name, nil
 			}
 		case xml.EndElement:
 			if element.Name.Local == "Body" {
@@ -635,7 +647,7 @@ func requestAction(body []byte) (string, error) {
 			}
 		}
 	}
-	return "", errors.New("SOAP body has no operation")
+	return xml.Name{}, errors.New("SOAP body has no operation")
 }
 
 func movementDirection(body []byte) (string, error) {
