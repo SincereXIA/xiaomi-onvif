@@ -21,6 +21,8 @@ Versioning after the first public beta.
 
 ### Changed
 
+- Implement ONVIF GetNetworkInterfaces with a stable virtual identity per camera
+  and return service-specific capabilities for Home Assistant initialization.
 - Normalized Xiaomi video and audio RTP sequence/timestamp generation to avoid
   broken recordings caused by irregular camera timestamps.
 

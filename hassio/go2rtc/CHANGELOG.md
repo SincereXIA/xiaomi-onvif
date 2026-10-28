@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- Implement GetNetworkInterfaces with a stable virtual identity per camera.
+- Return separate Device, Media and PTZ service capabilities for ONVIF clients.
+- Declare ONVIF snapshots unsupported so Home Assistant can use its FFmpeg fallback.
+- Test the Home Assistant ONVIF client's initialization and mocked PTZ workflow.
+
 ## 0.1.1
 
 - Allow each camera to override ONVIF width, height, frame rate and codec.
