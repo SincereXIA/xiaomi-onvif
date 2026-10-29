@@ -62,7 +62,11 @@ func (s *Stream) GetConnections() []core.Producer {
 
 	connections := make([]core.Producer, 0, len(s.producers))
 	for _, producer := range s.producers {
-		producer.mu.Lock()
+		// Dial holds this mutex while doing network I/O. Control lookups must
+		// remain cancellable instead of blocking behind a pending connection.
+		if !producer.mu.TryLock() {
+			continue
+		}
 		if producer.conn != nil {
 			connections = append(connections, producer.conn)
 		}

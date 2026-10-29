@@ -79,7 +79,7 @@ is omitted, the original camera timestamp conversion is retained.
 
 ## PTZ API in this distribution
 
-The active Xiaomi `miss` connection exposes a local control API:
+The Xiaomi `miss` connection exposes a local control API:
 
 ```text
 POST /api/xiaomi/ptz?src=xiaomi1&direction=left&duration=300
@@ -87,8 +87,19 @@ POST /api/xiaomi/ptz?src=xiaomi1&direction=left&duration=300
 
 Supported directions are `left`, `right`, `up`, `down` and `stop`. Movement
 duration is expressed in milliseconds and is limited to two seconds per
-request. The endpoint reuses an active stream variant for the same camera and
-always sends a stop command after a timed movement.
+request. Source builds containing the on-demand PTZ fix reuse an active stream
+variant for the same camera, or connect the named Xiaomi source on demand. A
+temporary video consumer pins that connection during control and for five
+seconds after the last command. It does not transcode, publish video or keep
+the camera streaming indefinitely. Removing this consumer does not stop other
+viewers or recordings. Add-on 0.1.2 still requires an already active connection.
+
+Concurrent commands share one pending connection. Initial connection and command
+execution have a combined 25-second budget; cold camera startup can be slower
+than control over an existing connection. Stop cancels pending movements and
+does not connect an idle camera. Timed movements always send a stop command on
+completion or cancellation. An upstream dial that cannot be interrupted is
+cleaned up when it finishes and cannot execute a canceled movement.
 
 Saved Xiaomi Home positions are available through:
 
@@ -96,6 +107,13 @@ Saved Xiaomi Home positions are available through:
 GET  /api/xiaomi/presets?src=xiaomi1
 POST /api/xiaomi/presets?src=xiaomi1&token=1
 ```
+
+Use the exact string token returned by discovery, not a list index or a guessed
+`0`/`1`. Tokens can be non-contiguous. Source builds containing the preset fix
+retain an explicitly returned zero location and require the requested token to
+be in the current camera list before activating it. The bridge does not create
+or overwrite Xiaomi Home favorites. Discovery and activation use the configured
+Xiaomi account and region and do not require an active video connection.
 
 These APIs are consumed by the bundled `xiaomi-onvif` bridge. Keep the go2rtc
 API on a trusted local or container network.

@@ -153,6 +153,30 @@ video encoding. No stream configuration is rewritten or transcoded by this fix.
 The client regression tests exercise HA's initialization calls against mock
 cameras, not a running HAOS instance or physical European C700 hardware.
 
+## PTZ connections and saved positions
+
+Source builds containing the on-demand PTZ fix can establish the original Xiaomi
+connection when a movement arrives, even with no dashboard or RTSP viewer. The
+connection is shared by concurrent control requests and held for five seconds
+after the last movement. This does not start the H264 transcode or interrupt
+existing viewers. The initial connection can take longer than a warm PTZ request.
+Add-on 0.1.2 requires an already active video connection for directional control.
+
+Saved Xiaomi Home favorites are exposed by `GetPresets` and `GotoPreset` through
+the configured Xiaomi cloud account. Use the token actually returned by
+`GetPresets`, not a guessed ordinal or the display name. The preset parsing fix
+preserves explicit zero locations and plain names such as `Home`, and rejects
+activation of locations absent from discovery. No favorites are created or changed.
+
+HA caches the preset tokens during ONVIF integration setup. After adding a
+favorite in Xiaomi Home or updating a source build that fixes discovery, reload
+the HA ONVIF integration to refresh its list. If the list is empty or a token is
+not present, HA can finish the service call without sending `GotoPreset`; inspect
+the HA ONVIF warnings as well as the bridge's `GetPresets`/`GotoPreset` result and
+timing logs. The dashboard's center button can call `GotoPreset` with the discovered
+token for your `Home` favorite. This is distinct from ONVIF `GotoHomePosition`,
+which the bridge does not advertise.
+
 ## Network access and lifecycle
 
 Host networking is necessary for the camera connections and advertised ONVIF

@@ -16,6 +16,19 @@ identity isolation and stability across process/port changes, blank and placehol
 credentials, unsupported snapshots/events/imaging, and HA's H264 profile filter.
 No camera credentials or physical hardware are used.
 
+The preset tests also execute an unchanged copy of
+`ONVIFDevice.async_perform_ptz` from the pinned HA release, stored in
+`fixtures/ha_perform_ptz.py.txt` under Apache-2.0 (see `fixtures/HA_LICENSE.md`).
+The fixture records its source URL and the SHA256 of the original source file.
+Its real empty-list and token-membership guards run against discovered presets
+and the real ONVIF client/bridge. Tests cover explicit zero and non-contiguous
+tokens, discovery faults and refreshing the list after a favorite is added.
+Update this fixture with the reference HA version, rather than editing its logic.
+
+Go tests in `internal/xiaomi` separately exercise the cloud response parser,
+API activation payloads, consumer sharing, on-demand connections, cancellation
+and cleanup with fake producers. Neither layer proves physical camera behavior.
+
 ```sh
 python3 -m venv /tmp/xiaomi-onvif-client-tests
 /tmp/xiaomi-onvif-client-tests/bin/pip install -r tests/onvif/requirements.txt
