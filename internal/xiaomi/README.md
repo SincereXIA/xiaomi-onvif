@@ -87,8 +87,8 @@ POST /api/xiaomi/ptz?src=xiaomi1&direction=left&duration=300
 
 Supported directions are `left`, `right`, `up`, `down` and `stop`. Movement
 duration is expressed in milliseconds and is limited to two seconds per
-request. Source builds containing the on-demand PTZ fix reuse an active stream
-variant for the same camera, or connect the named Xiaomi source on demand. A
+request. Add-on 0.1.3 and later reuse an active stream variant for the same
+camera, or connect the named Xiaomi source on demand. A
 temporary video consumer pins that connection during control and for five
 seconds after the last command. It does not transcode, publish video or keep
 the camera streaming indefinitely. Removing this consumer does not stop other
@@ -109,8 +109,8 @@ POST /api/xiaomi/presets?src=xiaomi1&token=1
 ```
 
 Use the exact string token returned by discovery, not a list index or a guessed
-`0`/`1`. Tokens can be non-contiguous. Source builds containing the preset fix
-retain an explicitly returned zero location and require the requested token to
+`0`/`1`. Tokens can be non-contiguous. Add-on 0.1.3 and later retain an explicitly
+returned zero location and require the requested token to
 be in the current camera list before activating it. The bridge does not create
 or overwrite Xiaomi Home favorites. Discovery and activation use the configured
 Xiaomi account and region and do not require an active video connection.

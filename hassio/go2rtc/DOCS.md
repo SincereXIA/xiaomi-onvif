@@ -155,8 +155,8 @@ cameras, not a running HAOS instance or physical European C700 hardware.
 
 ## PTZ connections and saved positions
 
-Source builds containing the on-demand PTZ fix can establish the original Xiaomi
-connection when a movement arrives, even with no dashboard or RTSP viewer. The
+Add-on 0.1.3 and later can establish the original Xiaomi connection when a
+movement arrives, even with no dashboard or RTSP viewer. The
 connection is shared by concurrent control requests and held for five seconds
 after the last movement. This does not start the H264 transcode or interrupt
 existing viewers. The initial connection can take longer than a warm PTZ request.
@@ -164,8 +164,9 @@ Add-on 0.1.2 requires an already active video connection for directional control
 
 Saved Xiaomi Home favorites are exposed by `GetPresets` and `GotoPreset` through
 the configured Xiaomi cloud account. Use the token actually returned by
-`GetPresets`, not a guessed ordinal or the display name. The preset parsing fix
-preserves explicit zero locations and plain names such as `Home`, and rejects
+`GetPresets`, not a guessed ordinal or the display name. In 0.1.3 and later,
+preset parsing preserves explicit zero locations and plain names such as `Home`,
+and rejects
 activation of locations absent from discovery. No favorites are created or changed.
 
 HA caches the preset tokens during ONVIF integration setup. After adding a

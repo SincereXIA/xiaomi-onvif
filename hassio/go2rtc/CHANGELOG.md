@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
 
 - Connect Xiaomi PTZ on demand and briefly retain the shared original stream.
 - Cancel pending movements on Stop and preserve other video consumers.
