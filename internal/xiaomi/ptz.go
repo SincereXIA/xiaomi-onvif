@@ -3,14 +3,12 @@ package xiaomi
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/AlexxIT/go2rtc/internal/api"
@@ -22,8 +20,6 @@ const (
 	ptzDefaultDuration = 300 * time.Millisecond
 	ptzMaxDuration     = 2 * time.Second
 )
-
-var ptzLocks sync.Map
 
 type directionSetter interface {
 	SetDirection(operation int) error
@@ -64,18 +60,44 @@ func apiPTZ(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	controller, did, err := findPTZController(src)
+	started := time.Now()
+	stream, did, err := ptzStream(src)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	ptzMu := cameraPTZMutex(did)
-	ptzMu.Lock()
-	err = runPTZ(r.Context(), controller, operation, duration)
-	ptzMu.Unlock()
+	camera := cameraPTZ(did)
+	var connectElapsed time.Duration
+	if operation == 0 {
+		// Stop cancels both pending connections and active timed movements. It
+		// must not open a new camera connection merely to stop an idle camera.
+		camera.cancelCommands()
+		if err = camera.lock(r.Context()); err == nil {
+			if controller := connectedPTZ(stream); controller != nil {
+				err = controller.SetDirection(0)
+			}
+			camera.unlock()
+		}
+	} else {
+		ctx, done := camera.command(r.Context())
+		defer done()
+		var controller directionSetter
+		var release func()
+		controller, release, err = camera.acquire(ctx, stream)
+		connectElapsed = time.Since(started)
+		if err == nil {
+			defer release()
+			if err = camera.lock(ctx); err == nil {
+				err = runPTZ(ctx, controller, operation, duration)
+				camera.unlock()
+			}
+		}
+	}
+	log.Debug().Str("src", src).Str("direction", direction).
+		Dur("connect_elapsed", connectElapsed).Dur("elapsed", time.Since(started)).Bool("success", err == nil).Msg("Xiaomi PTZ request")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		// Do not include source URLs or cloud/dial errors containing credentials.
+		http.Error(w, "Xiaomi PTZ connection or movement failed", http.StatusBadGateway)
 		return
 	}
 
@@ -101,39 +123,6 @@ func parsePTZDuration(value string, operation int) (time.Duration, error) {
 	return time.Duration(milliseconds) * time.Millisecond, nil
 }
 
-func findPTZController(src string) (directionSetter, string, error) {
-	stream := streams.Get(src)
-	if stream == nil {
-		return nil, "", fmt.Errorf("stream %q not found", src)
-	}
-
-	did := cameraDID(stream.Sources())
-	if did == "" {
-		return nil, "", fmt.Errorf("stream %q is not a Xiaomi camera", src)
-	}
-
-	// Prefer the requested stream, then any active quality variant for the same
-	// camera. Frigate commonly keeps only the detect and record variants open.
-	if controller := connectedPTZ(stream); controller != nil {
-		return controller, did, nil
-	}
-	for name, sources := range streams.GetAllSources() {
-		if name == src || cameraDID(sources) != did {
-			continue
-		}
-		if controller := connectedPTZ(streams.Get(name)); controller != nil {
-			return controller, did, nil
-		}
-	}
-
-	return nil, "", fmt.Errorf("Xiaomi camera %q has no active connection", src)
-}
-
-func cameraPTZMutex(did string) *sync.Mutex {
-	value, _ := ptzLocks.LoadOrStore(did, new(sync.Mutex))
-	return value.(*sync.Mutex)
-}
-
 func cameraDID(sources []string) string {
 	for _, source := range sources {
 		u, err := url.Parse(source)
@@ -157,6 +146,9 @@ func connectedPTZ(stream *streams.Stream) directionSetter {
 }
 
 func runPTZ(ctx context.Context, controller directionSetter, operation int, duration time.Duration) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if operation == 0 {
 		return controller.SetDirection(0)
 	}
@@ -173,6 +165,9 @@ func runPTZ(ctx context.Context, controller directionSetter, operation int, dura
 	defer ticker.Stop()
 
 	for {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
 		if err = controller.SetDirection(operation); err != nil {
 			return err
 		}
@@ -226,14 +221,24 @@ func apiPresets(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
+		log.Debug().Str("src", src).Int("count", len(presets)).Msg("Xiaomi presets discovered")
 		api.ResponseJSON(w, presets)
 		return
 	}
 
 	token := r.URL.Query().Get("token")
 	location, err := strconv.Atoi(token)
-	if err != nil || location < 1 {
-		http.Error(w, "token must be a positive preset location", http.StatusBadRequest)
+	if err != nil || location < 0 || location > 64 {
+		http.Error(w, "token must be a preset location between 0 and 64", http.StatusBadRequest)
+		return
+	}
+	presets, err := getCameraPresets(camera)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if !hasPreset(presets, token) {
+		http.Error(w, "preset token was not discovered for this camera", http.StatusBadRequest)
 		return
 	}
 	if err = gotoCameraPreset(camera, location); err != nil {
@@ -278,9 +283,11 @@ func parseCameraCloud(sources []string, did string) *cameraCloud {
 	return nil
 }
 
+var presetCloudRequest = cloudRequest
+
 func getCameraPresets(camera *cameraCloud) ([]xiaomiPreset, error) {
 	params := fmt.Sprintf(`{"params":[{"did":%q,"siid":10,"piid":1}]}`, camera.did)
-	res, err := cloudRequest(camera.userID, camera.region, "/miotspec/prop/get", params)
+	res, err := presetCloudRequest(camera.userID, camera.region, "/miotspec/prop/get", params)
 	if err != nil {
 		return nil, err
 	}
@@ -289,43 +296,15 @@ func getCameraPresets(camera *cameraCloud) ([]xiaomiPreset, error) {
 		return nil, fmt.Errorf("decode preset response: %w", err)
 	}
 	if len(results) == 0 || results[0].Code != 0 {
-		return nil, fmt.Errorf("camera returned no presets: %s", res)
+		return nil, errors.New("camera rejected preset discovery")
 	}
 
-	var encoded string
-	if err = json.Unmarshal(results[0].Value, &encoded); err != nil {
-		return nil, fmt.Errorf("decode preset property: %w", err)
-	}
-	var areas []struct {
-		Index    int    `json:"idx"`
-		Location int    `json:"location"`
-		Name     string `json:"name"`
-	}
-	if err = json.Unmarshal([]byte(encoded), &areas); err != nil {
-		return nil, fmt.Errorf("decode preset list: %w", err)
-	}
-
-	presets := make([]xiaomiPreset, 0, len(areas))
-	for _, area := range areas {
-		location := area.Location
-		if location == 0 {
-			location = area.Index
-		}
-		if location == 0 {
-			continue
-		}
-		name := area.Name
-		if decoded, decodeErr := base64.StdEncoding.DecodeString(area.Name); decodeErr == nil {
-			name = string(decoded)
-		}
-		presets = append(presets, xiaomiPreset{Token: strconv.Itoa(location), Name: name})
-	}
-	return presets, nil
+	return parseCameraPresets(results[0].Value)
 }
 
 func gotoCameraPreset(camera *cameraCloud, location int) error {
 	params := fmt.Sprintf(`{"params":[{"did":%q,"siid":10,"piid":2,"value":%d}]}`, camera.did, location)
-	res, err := cloudRequest(camera.userID, camera.region, "/miotspec/prop/set", params)
+	res, err := presetCloudRequest(camera.userID, camera.region, "/miotspec/prop/set", params)
 	if err != nil {
 		return err
 	}
@@ -334,7 +313,7 @@ func gotoCameraPreset(camera *cameraCloud, location int) error {
 		return fmt.Errorf("decode goto preset response: %w", err)
 	}
 	if len(results) == 0 || results[0].Code != 0 {
-		return fmt.Errorf("camera rejected preset %d: %s", location, res)
+		return fmt.Errorf("camera rejected preset %d", location)
 	}
 	return nil
 }

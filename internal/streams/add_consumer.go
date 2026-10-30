@@ -22,6 +22,10 @@ func (s *Stream) AddConsumer(cons core.Consumer) (err error) {
 
 	producers:
 		for prodN, prod := range s.producers {
+			// Control consumers must not dial unrelated fallback/transcode sources.
+			if filter, ok := cons.(interface{ AcceptSource(string) bool }); ok && !filter.AcceptSource(prod.url) {
+				continue
+			}
 			// check for loop request, ex. `camera1: ffmpeg:camera1`
 			if info, ok := cons.(core.Info); ok && prod.url == info.GetSource() {
 				log.Trace().Msgf("[streams] skip cons=%d prod=%d", consN, prodN)

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Connect Xiaomi PTZ on demand and briefly retain the shared original stream.
+- Cancel pending movements on Stop and preserve other video consumers.
+- Preserve zero preset locations and plain names; validate discovered tokens.
+- Test cold connections, cancellation, cleanup and HA's preset service guards.
+
 ## 0.1.2
 
 - Implement GetNetworkInterfaces with a stable virtual identity per camera.

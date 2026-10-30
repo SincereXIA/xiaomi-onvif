@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 import socket
 import unittest
+from types import SimpleNamespace
 
 from aiohttp import ClientSession, web
 import onvif
@@ -41,6 +42,11 @@ def free_ports(count):
 class HAClientTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.calls = []
+        self.preset_list = [{"token": "1", "name": "Desk & window"}]
+        self.preset_error = False
+        self.move_delay = 0
+        self.move_finished = asyncio.Event()
+        self.move_connection_closed = False
         self.clients = []
         self.process = None
         self.runner = web.AppRunner(self.mock_backend(), access_log=None)
@@ -57,11 +63,21 @@ class HAClientTests(unittest.IsolatedAsyncioTestCase):
         async def presets(request):
             self.calls.append((request.method, request.path, dict(request.query)))
             if request.method == "GET":
-                return web.json_response([{"token": "1", "name": "Desk & window"}])
+                if self.preset_error:
+                    return web.Response(status=502, text="Preset discovery failed")
+                return web.json_response(self.preset_list)
+            if request.query.get("token") not in [p["token"] for p in self.preset_list]:
+                return web.Response(status=400, text="Preset token was not discovered")
             return web.json_response({"ok": True})
 
         async def movement(request):
             self.calls.append((request.method, request.path, dict(request.query)))
+            if self.move_delay:
+                await asyncio.sleep(self.move_delay)
+                self.move_connection_closed = (
+                    request.transport is None or request.transport.is_closing()
+                )
+                self.move_finished.set()
             return web.json_response({"ok": True})
 
         app = web.Application()
@@ -292,6 +308,131 @@ class HAClientTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertTrue(all(query["src"] == "living" for _, _, query in self.calls))
+
+    async def test_discovered_zero_and_sparse_presets_round_trip(self):
+        self.preset_list = [
+            {"token": "0", "name": "Home"},
+            {"token": "7", "name": "Window & door"},
+        ]
+        camera = await self.client()
+        ptz = await camera.create_ptz_service()
+        presets = await ptz.GetPresets("living")
+        self.assertEqual(
+            [(p.token, p.Name) for p in presets],
+            [("0", "Home"), ("7", "Window & door")],
+        )
+        # Use discovered tokens, as HA does, rather than assuming list indexes.
+        for preset in presets:
+            await ptz.GotoPreset(
+                {"ProfileToken": "living", "PresetToken": preset.token}
+            )
+        sent = [
+            q["token"]
+            for method, path, q in self.calls
+            if method == "POST" and path == "/api/xiaomi/presets"
+        ]
+        self.assertEqual(sent, ["0", "7"])
+        with self.assertRaises(Fault):
+            await ptz.GotoPreset({"ProfileToken": "living", "PresetToken": "1"})
+
+    async def test_preset_discovery_failure_and_refresh(self):
+        camera = await self.client()
+        ptz = await camera.create_ptz_service()
+        self.preset_error = True
+        with self.assertRaises(Fault):
+            await ptz.GetPresets("living")
+        self.preset_error = False
+        self.preset_list = []
+        self.assertEqual(await ptz.GetPresets("living"), [])
+        # HA reloads its discovered list on integration setup. A new query must
+        # expose favorites created after the previous initialization.
+        self.preset_list = [{"token": "7", "name": "Home"}]
+        presets = await ptz.GetPresets("living")
+        self.assertEqual([p.token for p in presets], ["7"])
+        await ptz.GotoPreset(
+            {"ProfileToken": "living", "PresetToken": presets[0].token}
+        )
+
+    async def test_actual_ha_preset_guard_and_reload(self):
+        # Execute the unmodified service method from the pinned HA release.
+        # This isolates its real guard behavior without booting HA Core.
+        namespace = {
+            "Profile": object,
+            "LOGGER": logging.getLogger("ha_preset_guard"),
+            "PAN_FACTOR": {},
+            "TILT_FACTOR": {},
+            "ZOOM_FACTOR": {},
+            "CONTINUOUS_MOVE": "ContinuousMove",
+            "RELATIVE_MOVE": "RelativeMove",
+            "ABSOLUTE_MOVE": "AbsoluteMove",
+            "GOTOPRESET_MOVE": "GotoPreset",
+            "STOP_MOVE": "Stop",
+            "ONVIFError": ONVIFError,
+            "asyncio": asyncio,
+        }
+        fixture = Path(__file__).parent / "fixtures" / "ha_perform_ptz.py.txt"
+        exec(compile(fixture.read_text(), str(fixture), "exec"), namespace)
+        perform = namespace["async_perform_ptz"]
+        camera = await self.client()
+        ptz = await camera.create_ptz_service()
+        device = SimpleNamespace(
+            capabilities=SimpleNamespace(ptz=True), device=camera, name="Test camera"
+        )
+        profile = SimpleNamespace(token="living", ptz=SimpleNamespace(presets=[]))
+
+        async def move(token):
+            await perform(
+                device,
+                profile,
+                distance=0.1,
+                speed=0.5,
+                move_mode="GotoPreset",
+                continuous_duration=0.5,
+                preset=token,
+            )
+
+        self.preset_list = []
+        profile.ptz.presets = [p.token for p in await ptz.GetPresets(profile.token)]
+        self.calls.clear()
+        with self.assertLogs("ha_preset_guard", level="WARNING"):
+            await move("0")
+        self.assertEqual(
+            self.calls, [], "HA must not send a request for an empty preset list"
+        )
+
+        self.preset_list = [
+            {"token": "0", "name": "Home"},
+            {"token": "7", "name": "Window"},
+        ]
+        # A reload re-queries GetPresets and replaces HA's cached token list.
+        profile.ptz.presets = [p.token for p in await ptz.GetPresets(profile.token)]
+        self.calls.clear()
+        with self.assertLogs("ha_preset_guard", level="WARNING"):
+            await move("1")
+        self.assertEqual(self.calls, [], "HA must not send an undiscovered token")
+        await move("0")
+        self.assertTrue(
+            any(
+                method == "POST" and query.get("token") == "0"
+                for method, _, query in self.calls
+            )
+        )
+
+    async def test_cold_movement_can_exceed_old_two_second_timeout(self):
+        self.move_delay = 2.1
+        camera = await self.client()
+        ptz = await camera.create_ptz_service()
+        await ptz.RelativeMove(
+            {"ProfileToken": "living", "Translation": {"PanTilt": {"x": 0.1, "y": 0}}}
+        )
+        async with asyncio.timeout(5):
+            await self.move_finished.wait()
+        self.assertFalse(
+            self.move_connection_closed,
+            "Bridge canceled a cold movement after two seconds",
+        )
+        self.move_delay = 0
+        await ptz.Stop({"ProfileToken": "living", "PanTilt": True, "Zoom": False})
 
 
 if __name__ == "__main__":

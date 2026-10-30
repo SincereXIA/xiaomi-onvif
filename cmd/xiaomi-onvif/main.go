@@ -24,10 +24,11 @@ import (
 )
 
 const (
-	segmentDuration      = 150 * time.Millisecond
-	requestTimeout       = 2 * time.Second
-	presetRequestTimeout = 10 * time.Second
-	relativeDeadband     = 0.02
+	segmentDuration        = 150 * time.Millisecond
+	requestTimeout         = 2 * time.Second
+	movementRequestTimeout = 30 * time.Second
+	presetRequestTimeout   = 10 * time.Second
+	relativeDeadband       = 0.02
 )
 
 var (
@@ -146,7 +147,7 @@ func main() {
 			video:        profiles[name],
 			go2rtcURL:    strings.TrimRight(*go2rtcURL, "/"),
 			rtspURL:      rtspURL,
-			httpClient:   &http.Client{Timeout: requestTimeout},
+			httpClient:   &http.Client{Timeout: movementRequestTimeout},
 			presetClient: &http.Client{Timeout: presetRequestTimeout},
 			status:       "IDLE",
 		}
@@ -267,7 +268,9 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "GetStreamUri":
 		response = fmt.Sprintf(`<trt:GetStreamUriResponse><trt:MediaUri><tt:Uri>%s</tt:Uri><tt:InvalidAfterConnect>false</tt:InvalidAfterConnect><tt:InvalidAfterReboot>false</tt:InvalidAfterReboot><tt:Timeout>PT0S</tt:Timeout></trt:MediaUri></trt:GetStreamUriResponse>`, xmlEscape(p.rtspURL))
 	case "GetPresets":
+		started := time.Now()
 		response, err = p.getPresets()
+		log.Printf("camera=%s action=GetPresets count=%d success=%t elapsed=%s", p.name, strings.Count(response, "<tptz:Preset "), err == nil, time.Since(started))
 		if err != nil {
 			p.soapFault(w, "ter:Action", err.Error())
 			return
@@ -313,7 +316,15 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			p.soapFault(w, "ter:InvalidArgVal", err.Error())
 			return
 		}
-		if err = p.gotoPreset(token); err != nil {
+		location, parseErr := strconv.Atoi(token)
+		if parseErr != nil || location < 0 || location > 64 || strconv.Itoa(location) != token {
+			p.soapFault(w, "ter:InvalidArgVal", "PresetToken must be a discovered location between 0 and 64")
+			return
+		}
+		started := time.Now()
+		err = p.gotoPreset(token)
+		log.Printf("camera=%s action=GotoPreset token=%d success=%t elapsed=%s", p.name, location, err == nil, time.Since(started))
+		if err != nil {
 			p.soapFault(w, "ter:Action", err.Error())
 			return
 		}
@@ -973,7 +984,7 @@ func (p *proxy) getPresets() (string, error) {
 	var result strings.Builder
 	result.WriteString(`<tptz:GetPresetsResponse>`)
 	for _, item := range presets {
-		result.WriteString(fmt.Sprintf(`<tptz:Preset token="%s"><tt:Name>%s</tt:Name><tptz:PTZPosition><tt:PanTilt x="0" y="0"/></tptz:PTZPosition></tptz:Preset>`, xmlEscape(item.Token), xmlEscape(item.Name)))
+		result.WriteString(fmt.Sprintf(`<tptz:Preset token="%s"><tt:Name>%s</tt:Name><tt:PTZPosition><tt:PanTilt x="0" y="0"/></tt:PTZPosition></tptz:Preset>`, xmlEscape(item.Token), xmlEscape(item.Name)))
 	}
 	result.WriteString(`</tptz:GetPresetsResponse>`)
 	return result.String(), nil
